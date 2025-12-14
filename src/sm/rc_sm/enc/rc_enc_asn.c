@@ -2109,10 +2109,11 @@ byte_array_t rc_enc_cpid_asn(e2sm_rc_cpid_t const* src)
   //xer_fprint(stdout, &asn_DEF_E2SM_RC_CallProcessID, &dst);
   //fflush(stdout);
 
+  byte_array_t ba = {.buf = malloc(16*1024), .len = 16*1024};
   const enum asn_transfer_syntax syntax = ATS_ALIGNED_BASIC_PER;
-  asn_encode_to_new_buffer_result_t er = asn_encode_to_new_buffer(NULL, syntax, &asn_DEF_E2SM_RC_CallProcessID, &dst);
-  assert(er.buffer != NULL && er.result.encoded > 0 && "Failed to encode.");
-  byte_array_t ba = {.buf = er.buffer, .len = er.result.encoded};
+  asn_enc_rval_t er = asn_encode_to_buffer(NULL, syntax, & asn_DEF_E2SM_RC_CallProcessID, &dst, ba.buf, ba.len);
+  assert(er.encoded > -1 && (size_t)er.encoded <= ba.len);
+  ba.len = er.encoded;
 
   return ba;
 }
@@ -2196,10 +2197,11 @@ byte_array_t rc_enc_ctrl_hdr_asn(e2sm_rc_ctrl_hdr_t const* src)
   //xer_fprint(stdout, &asn_DEF_E2SM_RC_ControlHeader, &dst);
   //fflush(stdout);
 
+  byte_array_t ba = {.buf = malloc(16*1024), .len = 16*1024};
   const enum asn_transfer_syntax syntax = ATS_ALIGNED_BASIC_PER;
-  asn_encode_to_new_buffer_result_t er = asn_encode_to_new_buffer(NULL, syntax, &asn_DEF_E2SM_RC_ControlHeader, &dst);
-  assert(er.buffer != NULL && er.result.encoded > 0 && "Failed to encode.");
-  byte_array_t ba = {.buf = er.buffer, .len = er.result.encoded};
+  asn_enc_rval_t er = asn_encode_to_buffer(NULL, syntax, &asn_DEF_E2SM_RC_ControlHeader, &dst, ba.buf, ba.len);
+  assert(er.encoded > -1 && (size_t)er.encoded <= ba.len);
+  ba.len = er.encoded;
 
   return ba;
 }
@@ -2350,10 +2352,11 @@ byte_array_t rc_enc_ctrl_msg_asn(e2sm_rc_ctrl_msg_t const* src)
   //xer_fprint(stdout, &asn_DEF_E2SM_RC_ControlMessage, &dst);
   //fflush(stdout);
 
+  byte_array_t ba = {.buf = malloc(16*1024), .len = 16*1024};
   const enum asn_transfer_syntax syntax = ATS_ALIGNED_BASIC_PER;
-  asn_encode_to_new_buffer_result_t er = asn_encode_to_new_buffer(NULL, syntax, &asn_DEF_E2SM_RC_ControlMessage, &dst);
-  assert(er.buffer != NULL && er.result.encoded > 0 && "Failed to encode.");
-  byte_array_t ba = {.buf = er.buffer, .len = er.result.encoded};
+  asn_enc_rval_t er = asn_encode_to_buffer(NULL, syntax, &asn_DEF_E2SM_RC_ControlMessage, &dst, ba.buf, ba.len);
+  assert(er.encoded > -1 && (size_t)er.encoded <= ba.len);
+  ba.len = er.encoded;
 
   return ba;
 }
@@ -2573,10 +2576,11 @@ byte_array_t rc_enc_ctrl_out_asn(e2sm_rc_ctrl_out_t const* src)
   //xer_fprint(stdout, &asn_DEF_E2SM_RC_ControlOutcome, &dst);
   //fflush(stdout);
 
+  byte_array_t ba = {.buf = malloc(16*1024), .len = 16*1024};
   const enum asn_transfer_syntax syntax = ATS_ALIGNED_BASIC_PER;
-  asn_encode_to_new_buffer_result_t er = asn_encode_to_new_buffer(NULL, syntax, &asn_DEF_E2SM_RC_ControlOutcome, &dst);
-  assert(er.buffer != NULL && er.result.encoded > 0 && "Failed to encode.");
-  byte_array_t ba = {.buf = er.buffer, .len = er.result.encoded};
+  asn_enc_rval_t er = asn_encode_to_buffer(NULL, syntax, &asn_DEF_E2SM_RC_ControlOutcome, &dst, ba.buf, ba.len);
+  assert(er.encoded > -1 && (size_t)er.encoded <= ba.len);
+  ba.len = er.encoded;
 
   return ba;
 }
@@ -3624,10 +3628,11 @@ byte_array_t rc_enc_func_def_asn(e2sm_rc_func_def_t const* src)
   //xer_fprint(stdout, &asn_DEF_E2SM_RC_RANFunctionDefinition, &dst);
   //fflush(stdout);
 
+  byte_array_t ba = {.buf = malloc(16*1024), .len = 16*1024};
   const enum asn_transfer_syntax syntax = ATS_ALIGNED_BASIC_PER;
-  asn_encode_to_new_buffer_result_t er = asn_encode_to_new_buffer(NULL, syntax, &asn_DEF_E2SM_RC_RANFunctionDefinition, &dst);
-  assert(er.buffer != NULL && er.result.encoded > 0 && "Failed to encode.");
-  byte_array_t ba = {.buf = er.buffer, .len = er.result.encoded};
+  asn_enc_rval_t er = asn_encode_to_buffer(NULL, syntax, &asn_DEF_E2SM_RC_RANFunctionDefinition, &dst, ba.buf, ba.len);
+  assert(er.encoded > -1 && (size_t)er.encoded <= ba.len);
+  ba.len = er.encoded;
 
   return ba;
 }

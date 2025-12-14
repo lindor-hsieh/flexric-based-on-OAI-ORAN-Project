@@ -33,10 +33,6 @@ FROM $BASE_IMAGE AS oai-flexric-base
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Europe/Paris
 
-ARG SANITIZER
-ARG E2AP_VERSION
-ARG KPM_VERSION
-
 #install developers pkg/repo
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes && \
@@ -94,10 +90,7 @@ RUN mkdir build && \
     cmake -GNinja \
           -DCMAKE_C_COMPILER=gcc-12 \
           -DCMAKE_CXX_COMPILER=g++-12 \
-          -DSANITIZER=$SANITIZER \
-          -DE2AP_VERSION=$E2AP_VERSION \
-          -DKPM_VERSION=$KPM_VERSION \
           .. && \
     ninja && \
     ninja install && \
-    ctest -j8 --output-on-failure -E Unit_test_TC_SM
+    ctest -j8 --output-on-failure

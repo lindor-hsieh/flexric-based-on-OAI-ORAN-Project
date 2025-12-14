@@ -48,9 +48,6 @@ Namespace = 'oaicicd-core'
 // Openshift server URL
 server = 'https://api.oai.cs.eurecom.fr:6443'
 
-// Docker build options
-dockerBuildOptions = '--no-cache '
-
 // Private Local Registry URL
 PrivateRegistryURL = 'porcepix.sboai.cs.eurecom.fr'
 
@@ -133,7 +130,7 @@ pipeline {
         }
       }
     }
-    stage('Build FlexRIC Function') {
+    stage('Build Core Network Function') {
       parallel {
         stage ('Build Ubuntu FLEXRIC Image') {
           steps {
@@ -239,9 +236,7 @@ pipeline {
           script {
             gitlabCommitStatus(name: "Running CTests") {
               sh "docker image rm oai-flexric-ctest:${flexric_tag} || true"
-              sh "docker buildx build --target oai-flexric-builder --tag oai-flexric-ctest:${flexric_tag} --file ci-scripts/Dockerfile.ctest --build-arg 'SANITIZER=NONE' --build-arg 'E2AP_VERSION=E2AP_V1' --build-arg 'KPM_VERSION=KPM_V2_01' . > archives/flexric_ctests_none_e2ap_v1_kpm_v2_01.log 2>&1 || true"
-              sh "docker buildx build --target oai-flexric-builder --tag oai-flexric-ctest:${flexric_tag} --file ci-scripts/Dockerfile.ctest --build-arg 'SANITIZER=ADDRESS' --build-arg 'E2AP_VERSION=E2AP_V2' --build-arg 'KPM_VERSION=KPM_V2_03' . > archives/flexric_ctests_address_e2ap_v2_kpm_v2_03.log 2>&1 || true"
-              sh "docker buildx build --target oai-flexric-builder --tag oai-flexric-ctest:${flexric_tag} --file ci-scripts/Dockerfile.ctest --build-arg 'SANITIZER=THREAD' --build-arg 'E2AP_VERSION=E2AP_V3' --build-arg 'KPM_VERSION=KPM_V3_00' . > archives/flexric_ctests_thread_e2ap_v3_kpm_v3_00.log 2>&1 || true"
+              sh "docker buildx build --target oai-flexric-builder --tag oai-flexric-ctest:${flexric_tag} --file ci-scripts/Dockerfile.ctest . > archives/flexric_ctests.log 2>&1"
             }
           }
         }

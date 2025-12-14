@@ -54,9 +54,10 @@ from common.python.building_report import (
 
 REPORT_NAME = 'test_results_oai_flexric.html'
 
-def ctest_summary(args, reportName, chapterName):
+def ctest_summary(args, reportName):
     cwd = os.getcwd()
     status = True
+    chapterName = 'CTests Summary'
     summary = ''
     if os.path.isfile(f'{cwd}/archives/{reportName}'):
         status = True
@@ -71,12 +72,11 @@ def ctest_summary(args, reportName, chapterName):
                 if section_status and re.search(section_end_pattern, line) is not None:
                     section_status = False
                 if section_status:
-                    result = re.search('(Unit_test_[A-Za-z0-9_]+) [\.]+', line)
+                    result = re.search('(Test *#[0-9]+: Unit_test_[A-Za-z0-9_]+) [\.]+', line)
                     passed = re.search('Passed', line)
                     if result is not None and passed is not None:
                         summary += generate_list_row(result.group(1), 'thumbs-up')
                     elif result is not None:
-                        status = False
                         summary += generate_list_row(result.group(1), 'thumbs-down')
         summary += generate_list_footer()
     else:
@@ -97,12 +97,10 @@ class HtmlReport():
         year = date.strftime("%Y")
         cwd = os.getcwd()
         with open(os.path.join(cwd, REPORT_NAME), 'w') as wfile:
-            wfile.write(re.sub('Core Network Test ', 'FlexRIC Test', generate_header(args)))
+            wfile.write(re.sub('Core Network Test ', '', generate_header(args)))
             wfile.write(generate_git_info(args))
             wfile.write(build_summary(args, 'flexric', '22', '9'))
-            wfile.write(ctest_summary(args, 'flexric_ctests_none_e2ap_v1_kpm_v2_01.log', 'CTest: NONE sanitizer & E2AP_V1 & KPM_V2_01'))
-            wfile.write(ctest_summary(args, 'flexric_ctests_address_e2ap_v2_kpm_v2_03.log', 'CTest: ADDRESS sanitizer & E2AP_V2 & KPM_V2_03'))
-            wfile.write(ctest_summary(args, 'flexric_ctests_thread_e2ap_v3_kpm_v3_00.log', 'CTest: THREAD sanitizer & E2AP_V3 & KPM_V3_00'))
+            wfile.write(ctest_summary(args, 'flexric_ctests.log'))
             wfile.write(re.sub('2023', year, generate_footer()))
 
 if __name__ == '__main__':

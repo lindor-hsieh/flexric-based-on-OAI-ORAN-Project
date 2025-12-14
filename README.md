@@ -292,15 +292,7 @@ Recognizing the critical role of the ns-O-RAN simulator, the Orange Innovation E
 
 ![alt text](fig/6.png)
 
-The simulator has been updated and enhanced to support E2AP v1.01, KPM v3.00, and RC v1.03. 
-This framework has been tested with the **kpm-rc** and **Eenergy Saving under Cell utilization** xApps.
-
-#### 5.4.1 Zero-touch operation: Energy Saving (ES) under Cell utilization xApp Overview
-
-The Orange Innovation Egypt team has developed an Energy Saving (ES) under cell utilization xApp. This xApp continuously monitors the Physical Resource Block (PRB) utilization of each cell to make informed decisions about network resource management while ensuring Quality of Service (QoS) for the scenario.
-
-* [Testbed tutorial](https://github.com/Orange-OpenSource/ns-O-RAN-flexric/?tab=readme-ov-file#43-energy-saving-under-cell-utilization-es-xapp-operation)
-* [Testbed demo](https://www.youtube.com/watch?v=p5MOp3b8Nm8) - the demo walks you through the process from monitoring PRB usage to initiating handovers and deactivating underutilized cells, and ensuring QoS observability throughout the scenario.
+The simulator has been updated and enhanced to support E2AP v1.01, E2SM-KPM v3.00, and E2SM-RC v1.03. This framework has been tested with the `/build/examples/xApp/c/kpm_rc/xapp_kpm_rc` xApp with different scenarios.
 
 ## 5.5 (opt.) Synchronize clock
 Before running the various components (RAN/nearRT-RIC/xApps), you probably want to align the machines' clock. For this aim, you can use `ptp4l` in all the machines
@@ -323,11 +315,12 @@ sudo phc2sys -m -s InterfaceName -w
 
 # 6. Integration with other nearRT-RICs 
 
-## 6.1 O-RAN SC nearRT-RIC
-We showcased the successful integration between OAI E2 agent and O-RAN SC nearRT-RIC in [the OAI E2AP tutorial](https://gitlab.eurecom.fr/oai/openairinterface5g/-/blob/develop/openair2/E2AP/README.md?ref_type=heads#5-o-ran-sc-nearrt-ric-interoperability).
+## 6.1 O-RAN OSC nearRT-RIC
+FlexRIC's E2 Agent (and OAI RAN that is embedded on it) has also been successfully tested using O-RAN's OSC nearRT-RIC H Release as shown at https://openairinterface.org/news/openairinterface-will-showcase-3-demos-at-the-o-ran-f2f-meeting-in-phoenix/ and https://openairinterface.org/joint-osc-oai-workshop-end-to-end-open-source-reference-designs-for-o-ran/ 
 
-Note that the OSC nearRT-RIC can also be tested with FlexRIC E2 agent emulators (`build/examples/emulator/agent/`).
-Before proceeding with integration, please set the `e2ap_server_port` to 36422 (the default is 36421), as the E2AP port for OSC nearRT-RIC is 36422.
+Follow OSC nearRT-RIC installation guide. The xApp can be found at https://github.com/mirazabal/kpm_rc-xapp. Please, note that we do not give support for the OSC nearRT-RIC.  
+
+Recorded presentation at Phoenix, October 2023 (4th minute): https://zoom.us/rec/play/N5mnAQUcEVRf8HN6qLYa4k7kjNq3bK4hQiYqHGv9KUoLfcR6GHiE-GvnmAudT6xccmZSbkxxYHRwTaxk.Zi7d8Sl1kQ6Sk1SH?canPlayFromShare=true&from=share_recording_detail&continueMode=true&componentName=rec-play&originRequestUrl=https%3A%2F%2Fzoom.us%2Frec%2Fshare%2FwiYXulPlAqIIDY_vLPQSGqYIj-e5Ef_UCxveMjrDNGgXLLvEcDF4v1cmVBe8imb4.WPi-DA_dfPDBQ0FH
 
 # 7. Support/further resources
 * Mailing list: if you need help or have some questions, you can subscribe to the mailing list `techs@mosaic-5g.io` that you can find at

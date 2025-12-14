@@ -32,7 +32,8 @@ extern "C" {
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdlib.h>
+
+
 
 //////////////////////////////////////
 // RIC Event Trigger Definition
@@ -169,30 +170,6 @@ typedef enum {    // 8.2.5 RAN Parameters for Report Service Style 5
   END_E2SM_RC_RS5_RAN_PARAM_ID
 } report_style_5_ran_param_id_e;
 
-typedef enum {
-  TARGET_PRIMARY_CELL_ID_8_4_4_1 = 1,
-  CHOICE_TARGET_CELL_8_4_4_1 = 2,
-  NR_CELL_8_4_4_1 = 3,
-  NR_CGI_8_4_4_1 = 4,
-  EUTRA_CELL_8_4_4_1 = 5,
-  EUTRA_CGI_8_4_4_1 = 6,
-  LIST_OF_PDU_SESSIONS_FOR_HANDOVER_8_4_4_1 = 7,
-  PDU_SESSION_ITEM_FOR_HANDOVER_8_4_4_1 = 8,
-  PDU_SESSION_ID_8_4_4_1 = 9,
-  LIST_OF_QOS_FLOWS_IN_THE_PDU_SESSION_8_4_4_1 = 10,
-  QOS_FLOW_ITEM_8_4_4_1 = 11,
-  QOS_FLOW_IDENTIFIER_8_4_4_1 = 12,
-  LIST_OF_DRBS_FOR_HANDOVER_8_4_4_1 = 13,
-  DRB_ITEM_FOR_HANDOVER_8_4_4_1 = 14,
-  DRB_ID_8_4_4_1 = 15,
-  LIST_OF_QOS_FLOWS_IN_THE_DRB_8_4_4_1 = 16,
-  QOS_FLOW_ITEM_DRB_8_4_4_1 = 17, 
-  QOS_FLOW_IDENTIFIER_DRB_8_4_4_1 = 18,
-  LIST_OF_SECONDARY_CELLS_TO_BE_SETUP_8_4_4_1 = 19,
-  SECONDARY_CELL_ITEM_TO_BE_SETUP_8_4_4_1 = 20,
-  SECONDARY_CELL_ID_8_4_4_1 = 21,
-} handover_Control_param_id_e;
-
 //////////////////////////////////////
 // RIC Event Trigger Definition
 /////////////////////////////////////
@@ -292,6 +269,7 @@ e2sm_rc_ind_hdr_t cp_e2sm_rc_ind_hdr(e2sm_rc_ind_hdr_t const* src);
 
 bool eq_e2sm_rc_ind_hdr(e2sm_rc_ind_hdr_t const* m0, e2sm_rc_ind_hdr_t const* m1);
 
+
 //////////////////////////////////////
 // RIC Indication Message 
 /////////////////////////////////////
@@ -379,12 +357,6 @@ bool eq_e2sm_rc_ctrl_hdr(e2sm_rc_ctrl_hdr_t const* m0, e2sm_rc_ctrl_hdr_t const*
 //////////////////////////////////////
 // RIC Control Message 
 /////////////////////////////////////
-
-typedef enum {
-  HANDOVER_CONTROL_7_6_4_1 = 1,
-  CONDITIONAL_HANDOVER_CONTROL_7_6_4_1 = 2,
-  DAPS_HANDOVER_CONTROL_7_6_4_1 = 3,
-} rc_ctrl_service_style_3_act_id_e;
 
 typedef enum{
   FORMAT_1_E2SM_RC_CTRL_MSG,
