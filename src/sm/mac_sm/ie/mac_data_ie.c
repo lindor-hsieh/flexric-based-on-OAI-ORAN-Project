@@ -22,6 +22,7 @@
 
 #include "mac_data_ie.h"
 
+#include <stdio.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -308,27 +309,23 @@ bool eq_mac_call_proc_id(mac_call_proc_id_t* m0, mac_call_proc_id_t* m1)
 
 void free_mac_ctrl_hdr( mac_ctrl_hdr_t* src)
 {
-
   assert(src != NULL);
-  assert(0!=0 && "Not implemented" ); 
+  (void)src; 
 }
 
 mac_ctrl_hdr_t cp_mac_ctrl_hdr(mac_ctrl_hdr_t* src)
 {
   assert(src != NULL);
-  assert(0!=0 && "Not implemented" ); 
-  mac_ctrl_hdr_t ret = {0};
-  return ret;
+  mac_ctrl_hdr_t dst = {0};
+  dst.dummy = src->dummy;
+  return dst;
 }
 
 bool eq_mac_ctrl_hdr(mac_ctrl_hdr_t* m0, mac_ctrl_hdr_t* m1)
 {
   assert(m0 != NULL);
   assert(m1 != NULL);
-
-  assert(0!=0 && "Not implemented" ); 
-
-  return true;
+  return m0->dummy == m1->dummy;
 }
 
 
@@ -340,17 +337,29 @@ bool eq_mac_ctrl_hdr(mac_ctrl_hdr_t* m0, mac_ctrl_hdr_t* m1)
 void free_mac_ctrl_msg( mac_ctrl_msg_t* src)
 {
   assert(src != NULL);
-
-  assert(0!=0 && "Not implemented" ); 
+  (void)src; // 如果結構裡沒有指標 (只有 int)，就不需要 free
 }
 
 mac_ctrl_msg_t cp_mac_ctrl_msg(mac_ctrl_msg_t* src)
 {
   assert(src != NULL);
+  
+  mac_ctrl_msg_t dst = {0};
 
-  assert(0!=0 && "Not implemented" ); 
-  mac_ctrl_msg_t ret = {0};
-  return ret;
+  // 1. copy action
+  dst.action = src->action;
+  
+  // 2. copy RNTI
+  dst.rnti = src->rnti;
+
+  // 3. copy PRB Limit
+  dst.prb_limit = src->prb_limit; 
+
+  // Debug Log: 讓我們知道 FlexRIC 真的有在搬運數據
+  printf("[FlexRIC IE] Copying Ctrl Msg: Action=%d, RNTI=%d, Limit=%d\n", 
+         dst.action, dst.rnti, dst.prb_limit);
+
+  return dst;
 }
 
 bool eq_mac_ctrl_msg(mac_ctrl_msg_t* m0, mac_ctrl_msg_t* m1)
@@ -358,7 +367,11 @@ bool eq_mac_ctrl_msg(mac_ctrl_msg_t* m0, mac_ctrl_msg_t* m1)
   assert(m0 != NULL);
   assert(m1 != NULL);
 
-  assert(0!=0 && "Not implemented" ); 
+  if(m0->action != m1->action) return false;
+  if(m0->rnti != m1->rnti) return false;
+  
+  // 比較也要記得加
+  if(m0->prb_limit != m1->prb_limit) return false;
 
   return true;
 }
@@ -371,27 +384,22 @@ bool eq_mac_ctrl_msg(mac_ctrl_msg_t* m0, mac_ctrl_msg_t* m1)
 void free_mac_ctrl_out(mac_ctrl_out_t* src)
 {
   assert(src != NULL);
-
-  assert(0!=0 && "Not implemented" ); 
+  (void)src;
 }
 
 mac_ctrl_out_t cp_mac_ctrl_out(mac_ctrl_out_t* src)
 {
   assert(src != NULL);
-
-  assert(0!=0 && "Not implemented" ); 
-  mac_ctrl_out_t ret = {0}; 
-  return ret;
+  mac_ctrl_out_t dst = {0}; 
+  dst.ans = src->ans;
+  return dst;
 }
 
 bool eq_mac_ctrl_out(mac_ctrl_out_t* m0, mac_ctrl_out_t* m1)
 {
   assert(m0 != NULL);
   assert(m1 != NULL);
-
-  assert(0!=0 && "Not implemented" ); 
-
-  return true;
+  return m0->ans == m1->ans;
 }
 
 
