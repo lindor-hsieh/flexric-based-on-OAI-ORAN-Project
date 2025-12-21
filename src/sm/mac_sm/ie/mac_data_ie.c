@@ -308,16 +308,15 @@ bool eq_mac_call_proc_id(mac_call_proc_id_t* m0, mac_call_proc_id_t* m1)
 
 void free_mac_ctrl_hdr( mac_ctrl_hdr_t* src)
 {
-
   assert(src != NULL);
-  assert(0!=0 && "Not implemented" ); 
+  // dummy 是 uint32_t，不需要釋放記憶體
 }
 
 mac_ctrl_hdr_t cp_mac_ctrl_hdr(mac_ctrl_hdr_t* src)
 {
   assert(src != NULL);
-  assert(0!=0 && "Not implemented" ); 
   mac_ctrl_hdr_t ret = {0};
+  ret.dummy = src->dummy; // 直接複製 dummy 值
   return ret;
 }
 
@@ -325,10 +324,7 @@ bool eq_mac_ctrl_hdr(mac_ctrl_hdr_t* m0, mac_ctrl_hdr_t* m1)
 {
   assert(m0 != NULL);
   assert(m1 != NULL);
-
-  assert(0!=0 && "Not implemented" ); 
-
-  return true;
+  return m0->dummy == m1->dummy;
 }
 
 
@@ -337,29 +333,44 @@ bool eq_mac_ctrl_hdr(mac_ctrl_hdr_t* m0, mac_ctrl_hdr_t* m1)
 /////////////////////////////////////
 
 
-void free_mac_ctrl_msg( mac_ctrl_msg_t* src)
+void free_mac_ctrl_msg(mac_ctrl_msg_t* src)
 {
   assert(src != NULL);
-
-  assert(0!=0 && "Not implemented" ); 
+  // 如果有分配 slices 陣列，就要釋放它
+  if (src->len_slices > 0 && src->slices != NULL) {
+    free(src->slices);
+  }
 }
 
 mac_ctrl_msg_t cp_mac_ctrl_msg(mac_ctrl_msg_t* src)
 {
   assert(src != NULL);
-
-  assert(0!=0 && "Not implemented" ); 
   mac_ctrl_msg_t ret = {0};
+
+  ret.type = src->type;
+  ret.len_slices = src->len_slices;
+
+  // 深層複製 (Deep Copy) slices 陣列
+  if (src->len_slices > 0) {
+    ret.slices = calloc(src->len_slices, sizeof(mac_slice_params_t));
+    assert(ret.slices != NULL && "Memory exhausted");
+    memcpy(ret.slices, src->slices, src->len_slices * sizeof(mac_slice_params_t));
+  }
+
   return ret;
 }
 
 bool eq_mac_ctrl_msg(mac_ctrl_msg_t* m0, mac_ctrl_msg_t* m1)
 {
-  assert(m0 != NULL);
-  assert(m1 != NULL);
-
-  assert(0!=0 && "Not implemented" ); 
-
+  if (m0->type != m1->type) return false;
+  if (m0->len_slices != m1->len_slices) return false;
+  
+  // 逐一比較切片內容
+  for (int i = 0; i < m0->len_slices; i++) {
+      if (m0->slices[i].id != m1->slices[i].id) return false;
+      // 浮點數比較需要一點寬容度，但在這裡先直接比
+      if (m0->slices[i].percentage != m1->slices[i].percentage) return false;
+  }
   return true;
 }
 
@@ -371,16 +382,14 @@ bool eq_mac_ctrl_msg(mac_ctrl_msg_t* m0, mac_ctrl_msg_t* m1)
 void free_mac_ctrl_out(mac_ctrl_out_t* src)
 {
   assert(src != NULL);
-
-  assert(0!=0 && "Not implemented" ); 
+  // ans 是 enum，不需要釋放記憶體
 }
 
 mac_ctrl_out_t cp_mac_ctrl_out(mac_ctrl_out_t* src)
 {
   assert(src != NULL);
-
-  assert(0!=0 && "Not implemented" ); 
   mac_ctrl_out_t ret = {0}; 
+  ret.ans = src->ans; // 直接複製結果
   return ret;
 }
 
@@ -388,10 +397,7 @@ bool eq_mac_ctrl_out(mac_ctrl_out_t* m0, mac_ctrl_out_t* m1)
 {
   assert(m0 != NULL);
   assert(m1 != NULL);
-
-  assert(0!=0 && "Not implemented" ); 
-
-  return true;
+  return m0->ans == m1->ans;
 }
 
 

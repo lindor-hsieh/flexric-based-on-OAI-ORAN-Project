@@ -74,6 +74,7 @@ exp_ind_data_t on_indication_mac_sm_ag(sm_agent_t const* sm_agent, void* act_def
 {
   //printf("on_indication called \n");
   assert(sm_agent != NULL);
+  (void)act_def;
   assert(act_def == NULL && "Action definition data not needed for this SM");
   sm_mac_agent_t* sm = (sm_mac_agent_t*)sm_agent;
 
@@ -118,25 +119,39 @@ sm_ctrl_out_data_t on_control_mac_sm_ag(sm_agent_t const* sm_agent, sm_ctrl_req_
   assert(data != NULL);
   sm_mac_agent_t* sm = (sm_mac_agent_t*) sm_agent;
 
+  // 1. 解碼 Header
   mac_ctrl_hdr_t hdr = mac_dec_ctrl_hdr(&sm->enc, data->len_hdr, data->ctrl_hdr);
-  assert(hdr.dummy == 1 && "Only dummy == 1 supported ");
+  // assert(hdr.dummy == 1 && "Only dummy == 1 supported "); // 建議註解掉，避免非預期 Crash
 
+  // 2. 解碼 Message (這裡會分配記憶體給 slices)
   mac_ctrl_msg_t msg = mac_dec_ctrl_msg(&sm->enc, data->len_msg, data->ctrl_msg);
-  assert(msg.action == 42 && "Only action number 42 supported");
+  
+  // 移除舊的 action 檢查，因為欄位已經沒了
+  // assert(msg.action == 42 && "Only action number 42 supported"); 
 
-//  sm_ag_if_wr_t wr = {.type = CONTROL_SM_AG_IF_WR };
-//  wr.ctrl.type = MAC_CTRL_REQ_V0; 
-
+  // 3. 準備傳給 RAN Function 的資料結構
   mac_ctrl_req_data_t mac_ctrl = {0};
   mac_ctrl.hdr.dummy = hdr.dummy;
-  mac_ctrl.msg.action = msg.action;
 
+  // =================================================================
+  // [關鍵修正] 使用 Deep Copy 函式，而不是手動賦值！
+  // 這樣 slices 陣列才會被正確複製過去，不會發生 "中間人丟包"
+  // =================================================================
+  mac_ctrl.msg = cp_mac_ctrl_msg(&msg); 
+
+  // 4. 呼叫 RAN Function (ran_func_mac.c) 執行控制
   sm->base.io.write_ctrl(&mac_ctrl);
+  
+  // 5. [記憶體管理] 釋放暫存的記憶體 (非常重要！)
+  // msg 是解碼出來的，用完要丟
+  free_mac_ctrl_msg(&msg);
+  // mac_ctrl.msg 是複製出來的，用完也要丟
+  free_mac_ctrl_msg(&mac_ctrl.msg);
+
   sm_ctrl_out_data_t ret = {0};
   ret.len_out = 0;
   ret.ctrl_out = NULL;
 
-  //printf("on_control called \n");
   return ret;
 }
 

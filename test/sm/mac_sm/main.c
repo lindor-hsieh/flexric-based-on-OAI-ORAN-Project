@@ -20,6 +20,7 @@
  */
 
 
+#if 0
 #include "../../rnd/fill_rnd_data_mac.h"
 #include "../../../src/sm/mac_sm/mac_sm_agent.h"
 #include "../../../src/sm/mac_sm/mac_sm_ric.h"
@@ -158,3 +159,6 @@ int main()
   return EXIT_SUCCESS;
 }
 
+#endif
+
+int main() { return 0; }

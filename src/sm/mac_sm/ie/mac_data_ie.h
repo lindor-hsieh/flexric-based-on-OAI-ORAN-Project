@@ -13,7 +13,7 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
- * limitations under the License.
+ * limitations under the License.a
  *-------------------------------------------------------------------------------
  * For more information about the OpenAirInterface (OAI) Software Alliance:
  *      contact@openairinterface.org
@@ -178,8 +178,20 @@ bool eq_mac_ctrl_hdr(mac_ctrl_hdr_t* m0, mac_ctrl_hdr_t* m1);
 // RIC Control Message 
 /////////////////////////////////////
 
+// 1. 先定義切片參數結構
 typedef struct {
-  uint32_t action;
+  uint8_t  id;          // 切片 ID (1, 2...)
+  float    percentage;  // 資源比例 (0.7, 0.3...)
+} mac_slice_params_t;
+
+typedef struct {
+  // uint32_t action;
+  // 新增類型標記 (0: 設定切片, 1: 綁定 UE...)
+  uint8_t type; 
+
+  // 切片設定 payload
+  uint8_t len_slices;          // 有幾個切片？
+  mac_slice_params_t* slices;  // <--- 這裡使用了上面定義的結構
 } mac_ctrl_msg_t;
 
 void free_mac_ctrl_msg( mac_ctrl_msg_t* src); 
