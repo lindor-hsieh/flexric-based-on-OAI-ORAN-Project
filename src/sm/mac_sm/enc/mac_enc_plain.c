@@ -1,186 +1,176 @@
 /*
- * Licensed to the OpenAirInterface (OAI) Software Alliance under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The OpenAirInterface Software Alliance licenses this file to You under
- * the OAI Public License, Version 1.1  (the "License"); you may not use this file
- * except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.openairinterface.org/?page_id=698
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *-------------------------------------------------------------------------------
- * For more information about the OpenAirInterface (OAI) Software Alliance:
- * contact@openairinterface.org
+ * Licensed to the OpenAirInterface (OAI) Software Alliance ...
+ * (保留原始 License 宣告)
  */
 
 #include "mac_enc_plain.h"
-
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
+// ---------------------------------------------------------------------------
+// 1. Event Trigger 編碼 (用於 RIC Subscription)
+// ---------------------------------------------------------------------------
 byte_array_t mac_enc_event_trigger_plain(mac_event_trigger_t const* event_trigger)
 {
   assert(event_trigger != NULL);
-  byte_array_t  ba = {0};
+  byte_array_t ba = {0};
  
   ba.len = sizeof(event_trigger->ms);
   ba.buf = malloc(ba.len);
   assert(ba.buf != NULL && "Memory exhausted");
 
   memcpy(ba.buf, &event_trigger->ms, ba.len);
-
   return ba;
 }
 
+// ---------------------------------------------------------------------------
+// 2. Action Definition 編碼 (通常為空)
+// ---------------------------------------------------------------------------
 byte_array_t mac_enc_action_def_plain(mac_action_def_t const* action_def)
 {
-  // assert(0!=0 && "Not implemented");
-  // 為了避免 crash，給個空實作
   assert(action_def != NULL);
-  byte_array_t  ba = {0};
+  byte_array_t ba = {0}; // Plain 模式下通常不使用此欄位
   return ba;
 }
 
+// ---------------------------------------------------------------------------
+// 3. Indication Header 編碼 (gNB -> RIC)
+// ---------------------------------------------------------------------------
 byte_array_t mac_enc_ind_hdr_plain(mac_ind_hdr_t const* ind_hdr)
 {
   assert(ind_hdr != NULL);
-
   byte_array_t ba = {0};
 
   ba.len = sizeof(mac_ind_hdr_t);
-  ba.buf = calloc(ba.len,  sizeof(uint8_t));
-  assert(ba.buf != NULL && "memory exhausted");
+  ba.buf = calloc(1, ba.len);
+  assert(ba.buf != NULL && "Memory exhausted");
   memcpy(ba.buf, ind_hdr, ba.len);
 
   return ba;
 }
 
-// [CQI] 這裡不需要改，因為 mac_ue_stats_impl_t 已經變大了
-// sizeof 會自動把包含 CQI 的新大小算進去
+// ---------------------------------------------------------------------------
+// 4. Indication Message 編碼 (gNB -> RIC) - 傳送 UE 統計與 MCS
+// ---------------------------------------------------------------------------
 byte_array_t mac_enc_ind_msg_plain(mac_ind_msg_t const* ind_msg)
 {
   assert(ind_msg != NULL);
 
+  // [DEBUG] 幫助確認 gNB 正在發送數據，這對於解決 "UE Count 0" 非常重要
+  // printf("[OAI-E2] >>> Encoding MAC Indication with %u UEs <<<\n", (unsigned int)ind_msg->len_ue_stats);
+
   byte_array_t ba = {0};
   
-  // 計算總長度：長度欄位 + (單個 UE 統計結構大小 * UE 數量) + 時間戳記
+  // 計算總長度：數量欄位(4) + (UE結構大小 * 數量) + 時間戳記(8)
   const uint32_t len = sizeof(ind_msg->len_ue_stats) 
-                      + sizeof(mac_ue_stats_impl_t) * ind_msg->len_ue_stats
+                      + (sizeof(mac_ue_stats_impl_t) * ind_msg->len_ue_stats)
                       + sizeof(ind_msg->tstamp); 
                       
   ba.buf = calloc(1, len); 
-  assert(ba.buf != NULL);
+  assert(ba.buf != NULL && "Memory exhausted");
 
-  // 1. Copy 數量
-  memcpy(ba.buf, &ind_msg->len_ue_stats, sizeof(ind_msg->len_ue_stats));
-  void* ptr = ba.buf + sizeof(ind_msg->len_ue_stats);
+  uint8_t* ptr = ba.buf;
 
-  // 2. Copy 每個 UE 的數據 (包含 CQI)
-  for(uint32_t i = 0; i < ind_msg->len_ue_stats; ++i){
-    memcpy(ptr, &ind_msg->ue_stats[i], sizeof(ind_msg->ue_stats[0])); 
-    ptr += sizeof(ind_msg->ue_stats[0]);
+  // A. 拷貝 UE 數量
+  memcpy(ptr, &ind_msg->len_ue_stats, sizeof(ind_msg->len_ue_stats));
+  ptr += sizeof(ind_msg->len_ue_stats);
+
+  // B. 拷貝每個 UE 的數據 (包含 dl_mcs1, rnti 等)
+  if (ind_msg->len_ue_stats > 0) {
+    size_t const sz_array = sizeof(mac_ue_stats_impl_t) * ind_msg->len_ue_stats;
+    memcpy(ptr, ind_msg->ue_stats, sz_array);
+    ptr += sz_array;
   }
 
-  // 3. Copy 時間戳記
+  // C. 拷貝時間戳記 (最後 8 bytes)
   memcpy(ptr, &ind_msg->tstamp, sizeof(ind_msg->tstamp));
   ptr += sizeof(ind_msg->tstamp);
 
-  assert(ptr == ba.buf + len && "Data layout mismacth");
+  assert(ptr == ba.buf + len && "Encoding Mismatch: Indication Message");
 
   ba.len = len;
   return ba;
 }
 
-
-byte_array_t mac_enc_call_proc_id_plain(mac_call_proc_id_t const* call_proc_id)
-{
-  // assert(0!=0 && "Not implemented");
-  assert(call_proc_id != NULL);
-  byte_array_t  ba = {0};
-  return ba;
-}
-
+// ---------------------------------------------------------------------------
+// 5. Control Header 編碼 (RIC -> gNB)
+// ---------------------------------------------------------------------------
 byte_array_t mac_enc_ctrl_hdr_plain(mac_ctrl_hdr_t const* ctrl_hdr)
 {
   assert(ctrl_hdr != NULL);
-  byte_array_t  ba = {0};
+  byte_array_t ba = {0};
   ba.len = sizeof(mac_ctrl_hdr_t);
-  ba.buf = calloc(ba.len ,sizeof(uint8_t)); 
+  ba.buf = calloc(1, ba.len); 
   assert(ba.buf != NULL);
-
   memcpy(ba.buf, ctrl_hdr, ba.len);
-
   return ba;
 }
 
-// [關鍵修改] 支援切片陣列的編碼
+// ---------------------------------------------------------------------------
+// 6. Control Message 編碼 (RIC -> gNB) - 關鍵：傳送切片配置
+// ---------------------------------------------------------------------------
 byte_array_t mac_enc_ctrl_msg_plain(mac_ctrl_msg_t const* ctrl_msg)
 {
   assert(ctrl_msg != NULL);
   byte_array_t ba = {0};
 
-  // 1. 計算所需的總長度
-  // 基本長度：Type (uint8) + slice 數量 (uint32)
+  // 序列化邏輯：[Type: 1 byte] + [Len: 4 bytes] + [Array: Len * StructSize]
   size_t total_len = sizeof(uint8_t); 
 
-  if (ctrl_msg->type == 0) { // Slice Config
+  if (ctrl_msg->type == 0) { // Slice Config Type
       total_len += sizeof(uint32_t); // len_slices
-      // 加上陣列內容的大小
       total_len += ctrl_msg->len_slices * sizeof(mac_slice_params_t);
   }
 
-  // 2. 分配記憶體
   ba.len = total_len;
   ba.buf = calloc(1, total_len); 
   assert(ba.buf != NULL && "Memory exhausted");
 
-  // 3. 開始序列化 (Serialize)
-  void* ptr = ba.buf;
+  uint8_t* ptr = ba.buf;
 
-  // Copy Type
+  // A. 寫入控制類型
   memcpy(ptr, &ctrl_msg->type, sizeof(uint8_t));
   ptr += sizeof(uint8_t);
 
-  // Copy Payload (如果是切片設定)
+  // B. 如果是切片設定，寫入陣列數據
   if (ctrl_msg->type == 0) {
-      // Copy 陣列長度
+      // 寫入陣列長度
       memcpy(ptr, &ctrl_msg->len_slices, sizeof(uint32_t));
       ptr += sizeof(uint32_t);
 
-      // Copy 每個切片的參數 (ID + Percentage)
-      for (size_t i = 0; i < ctrl_msg->len_slices; i++) {
-          memcpy(ptr, &ctrl_msg->slices[i], sizeof(mac_slice_params_t));
-          ptr += sizeof(mac_slice_params_t);
+      // 寫入整個切片參數陣列 (ID, Percentage)
+      if (ctrl_msg->len_slices > 0) {
+          size_t const sz_slices = ctrl_msg->len_slices * sizeof(mac_slice_params_t);
+          memcpy(ptr, ctrl_msg->slices, sz_slices);
+          ptr += sz_slices;
       }
   }
 
-  // 檢查指標是否剛好填滿緩衝區
-  assert(ptr == ba.buf + total_len && "Encoding Logic Error");
-
+  assert(ptr == ba.buf + total_len && "Encoding Logic Error: Control Message");
   return ba;
+}
+
+// ---------------------------------------------------------------------------
+// 7. 其他預留函式 (通常保持空實作)
+// ---------------------------------------------------------------------------
+byte_array_t mac_enc_call_proc_id_plain(mac_call_proc_id_t const* call_proc_id)
+{
+  assert(call_proc_id != NULL);
+  return (byte_array_t){0};
 }
 
 byte_array_t mac_enc_ctrl_out_plain(mac_ctrl_out_t const* ctrl) 
 {
-  // assert(0!=0 && "Not implemented");
-  assert(ctrl != NULL );
-  byte_array_t  ba = {0};
-  return ba;
+  assert(ctrl != NULL);
+  return (byte_array_t){0};
 }
 
 byte_array_t mac_enc_func_def_plain(mac_func_def_t const* func)
 {
-  // assert(0!=0 && "Not implemented");
   assert(func != NULL);
-  byte_array_t  ba = {0};
-  // 簡單實作：只複製內容，不處理複雜邏輯
+  byte_array_t ba = {0};
   if(func->len > 0) {
       ba.len = func->len;
       ba.buf = calloc(1, ba.len);

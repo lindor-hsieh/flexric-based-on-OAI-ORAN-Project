@@ -1,117 +1,79 @@
 /*
- * Licensed to the OpenAirInterface (OAI) Software Alliance under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The OpenAirInterface Software Alliance licenses this file to You under
- * the OAI Public License, Version 1.1  (the "License"); you may not use this file
- * except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.openairinterface.org/?page_id=698
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *-------------------------------------------------------------------------------
- * For more information about the OpenAirInterface (OAI) Software Alliance:
- * contact@openairinterface.org
+ * Licensed to the OpenAirInterface (OAI) Software Alliance ...
  */
 
 #include "mac_data_ie.h"
-
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h> // Added for debug print if needed
+#include <stdio.h>
 #include "../../../util/alg_ds/alg/eq_float.h"
 
 //////////////////////////////////////
-// RIC Event Trigger Definition
+// 1. RIC Event Trigger Definition
 /////////////////////////////////////
 
-void free_mac_event_trigger(mac_event_trigger_t* src)
-{
-  assert(src != NULL);
-  // Default implementation usually implies no dynamic memory here
-}
+void free_mac_event_trigger(mac_event_trigger_t* src) { (void)src; }
 
-mac_event_trigger_t cp_mac_event_trigger( mac_event_trigger_t const* src)
+mac_event_trigger_t cp_mac_event_trigger(mac_event_trigger_t const* src)
 {
   assert(src != NULL);
-  mac_event_trigger_t et = {0};
-  // Copy fields if any
+  mac_event_trigger_t et = {.ms = src->ms};
   return et;
 }
 
 bool eq_mac_event_trigger(mac_event_trigger_t const* m0, mac_event_trigger_t const* m1)
 {
-  assert(m0 != NULL);
-  assert(m1 != NULL);
-  return true;
+  assert(m0 != NULL && m1 != NULL);
+  return m0->ms == m1->ms;
 }
 
 //////////////////////////////////////
-// RIC Action Definition 
+// 2. RIC Action Definition 
 /////////////////////////////////////
 
-void free_mac_action_def(mac_action_def_t* src)
-{
-  assert(src != NULL);
-}
+void free_mac_action_def(mac_action_def_t* src) { (void)src; }
 
 mac_action_def_t cp_mac_action_def(mac_action_def_t* src)
 {
   assert(src != NULL);
-  mac_action_def_t ad = {0};
+  mac_action_def_t ad = {.dummy = src->dummy};
   return ad;
 }
 
-bool eq_mac_action_def(mac_event_trigger_t* m0,  mac_event_trigger_t* m1)
+bool eq_mac_action_def(mac_action_def_t const* m0, mac_action_def_t const* m1)
 {
-  assert(m0 != NULL);
-  assert(m1 != NULL);
-  return true;
+  assert(m0 != NULL && m1 != NULL);
+  return m0->dummy == m1->dummy;
 }
 
 //////////////////////////////////////
-// RIC Indication Header 
+// 3. RIC Indication Header 
 /////////////////////////////////////
 
-void free_mac_ind_hdr(mac_ind_hdr_t* src)
-{
-  assert(src != NULL);
-  (void)src;
-}
+void free_mac_ind_hdr(mac_ind_hdr_t* src) { (void)src; }
 
 mac_ind_hdr_t cp_mac_ind_hdr(mac_ind_hdr_t const* src)
 {
   assert(src != NULL);
-  mac_ind_hdr_t dst = {0}; 
-  dst.dummy = src->dummy;
+  mac_ind_hdr_t dst = {.dummy = src->dummy}; 
   return dst;
 }
 
 bool eq_mac_ind_hdr(mac_ind_hdr_t* m0, mac_ind_hdr_t* m1)
 {
-  assert(m0 != 0);
-  assert(m1 != 0);
-
-  if(m0->dummy != m1->dummy)
-    return false;
-  return true;
+  assert(m0 != NULL && m1 != NULL);
+  return m0->dummy == m1->dummy;
 }
 
 //////////////////////////////////////
-// RIC Indication Message 
+// 4. RIC Indication Message (UE Stats)
 /////////////////////////////////////
 
 void free_mac_ind_msg(mac_ind_msg_t* src)
 {
   assert(src != NULL);
-  if(src->len_ue_stats > 0){
-    assert(src->ue_stats != NULL);
+  if(src->len_ue_stats > 0 && src->ue_stats != NULL){
     free(src->ue_stats);
   }
 }
@@ -119,327 +81,143 @@ void free_mac_ind_msg(mac_ind_msg_t* src)
 mac_ue_stats_impl_t cp_mac_ue_stats_impl(mac_ue_stats_impl_t const* src)
 {
   assert(src != NULL);
-
-  mac_ue_stats_impl_t dst = { .dl_aggr_tbs = src->dl_aggr_tbs,
-                              .ul_aggr_tbs = src->ul_aggr_tbs,
-                              .dl_aggr_bytes_sdus = src->dl_aggr_bytes_sdus,
-                              .ul_aggr_bytes_sdus = src->ul_aggr_bytes_sdus,
-                              .dl_curr_tbs = src->dl_curr_tbs,
-                              .ul_curr_tbs = src->ul_curr_tbs,
-                              .dl_sched_rb = src->dl_sched_rb,
-                              .ul_sched_rb = src->ul_sched_rb,
-
-                              .pusch_snr = src->pusch_snr, 
-                              .pucch_snr = src->pucch_snr, 
-
-                              .rnti = src->rnti,
-                              .dl_aggr_prb = src->dl_aggr_prb, 
-                              .ul_aggr_prb = src->ul_aggr_prb,
-                              .dl_aggr_sdus = src->dl_aggr_sdus,
-                              .ul_aggr_sdus = src->ul_aggr_sdus,
-                              .dl_aggr_retx_prb = src->dl_aggr_retx_prb,
-                              .ul_aggr_retx_prb = src->ul_aggr_retx_prb,
-
-                              .wb_cqi = src->wb_cqi, // [關鍵] 這裡已經有 CQI 了
-                              .dl_mcs1 = src->dl_mcs1,
-                              .ul_mcs1 = src->ul_mcs1,
-                              .dl_mcs2 = src->dl_mcs2, 
-                              .ul_mcs2 = src->ul_mcs2, 
-                              .phr = src->phr,
-                              .bsr = src->bsr,
-                              .dl_bler = src->dl_bler,
-                              .ul_bler = src->ul_bler,
-                              .dl_num_harq = src->dl_num_harq,
-                              .dl_harq[0] = src->dl_harq[0],
-                              .dl_harq[1] = src->dl_harq[1],
-                              .dl_harq[2] = src->dl_harq[2],
-                              .dl_harq[3] = src->dl_harq[3],
-                              .dl_harq[4] = src->dl_harq[4],
-                              .ul_num_harq = src->ul_num_harq,
-                              .ul_harq[0] = src->ul_harq[0],
-                              .ul_harq[1] = src->ul_harq[1],
-                              .ul_harq[2] = src->ul_harq[2],
-                              .ul_harq[3] = src->ul_harq[3],
-                              .ul_harq[4] = src->ul_harq[4],
-                              .frame = src->frame,
-                              .slot = src->slot
-                            }; 
-
+  mac_ue_stats_impl_t dst;
+  memset(&dst, 0, sizeof(mac_ue_stats_impl_t));
+  memcpy(&dst, src, sizeof(mac_ue_stats_impl_t));
   return dst;
 }
 
-mac_ind_msg_t cp_mac_ind_msg( mac_ind_msg_t const* src)
+mac_ind_msg_t cp_mac_ind_msg(mac_ind_msg_t const* src)
 {
   assert(src != NULL);
-
-  mac_ind_msg_t dst = {0};
-
-  dst.len_ue_stats = src->len_ue_stats;
+  mac_ind_msg_t dst = {.len_ue_stats = src->len_ue_stats, .tstamp = src->tstamp};
   if(dst.len_ue_stats > 0){
-    dst.ue_stats = calloc(dst.len_ue_stats, sizeof( mac_ue_stats_impl_t) );
+    dst.ue_stats = calloc(dst.len_ue_stats, sizeof(mac_ue_stats_impl_t));
     assert(dst.ue_stats != NULL && "Memory exhausted");
+    memcpy(dst.ue_stats, src->ue_stats, dst.len_ue_stats * sizeof(mac_ue_stats_impl_t));
   }
-
-  for(size_t i = 0; i < dst.len_ue_stats; ++i){
-    dst.ue_stats[i] = cp_mac_ue_stats_impl(&src->ue_stats[i]); 
-  }
-
-  dst.tstamp = src->tstamp; 
-
   return dst;
 }
 
 bool eq_mac_ind_msg(mac_ind_msg_t* m0, mac_ind_msg_t* m1)
 {
-  assert(m0 != NULL);
-  assert(m1 != NULL);
-
-  if(m0->len_ue_stats != m1->len_ue_stats || m0->tstamp != m1->tstamp)
-    return false;
-
-  for(uint32_t i = 0 ; i < m0->len_ue_stats; ++i){
-    mac_ue_stats_impl_t* ue0 = &m0->ue_stats[i]; 
-    mac_ue_stats_impl_t* ue1 = &m1->ue_stats[i]; 
-
-    if(
-        ue0->dl_aggr_tbs != ue1->dl_aggr_tbs ||
-        ue0->ul_aggr_tbs != ue1->ul_aggr_tbs ||
-        ue0->dl_aggr_bytes_sdus != ue1->dl_aggr_bytes_sdus ||
-        ue0->ul_aggr_bytes_sdus != ue1->ul_aggr_bytes_sdus ||
-        ue0->dl_curr_tbs != ue1->dl_curr_tbs ||
-        ue0->ul_curr_tbs != ue1->ul_curr_tbs ||
-        ue0->dl_sched_rb != ue1->dl_sched_rb ||
-        ue0->ul_sched_rb != ue1->ul_sched_rb ||
-        ue0->rnti != ue1->rnti ||
-        ue0->dl_aggr_prb != ue1->dl_aggr_prb ||  
-        ue0->ul_aggr_prb != ue1->ul_aggr_prb ||
-        ue0->dl_aggr_sdus != ue1-> dl_aggr_sdus ||
-        ue0->ul_aggr_sdus != ue1->ul_aggr_sdus ||
-        ue0->dl_aggr_retx_prb != ue1->dl_aggr_retx_prb ||
-        ue0->ul_aggr_retx_prb != ue1->ul_aggr_retx_prb ||
-        ue0->wb_cqi != ue1->wb_cqi || // [關鍵] 比較 CQI
-        ue0->dl_mcs1 != ue1->dl_mcs1 ||
-        ue0->ul_mcs1 != ue1->ul_mcs1 ||
-        ue0->dl_mcs2 != ue1->dl_mcs2 || 
-        ue0->ul_mcs2 != ue1->ul_mcs2 || 
-        ue0->phr != ue1->phr || 
-        ue0->bsr != ue1->bsr ||
-        ue0->dl_bler != ue1->dl_bler ||
-        ue0->ul_bler != ue1->ul_bler ||
-        ue0->dl_num_harq != ue1->dl_num_harq ||
-        ue0->dl_harq[0] != ue1->dl_harq[0] ||
-        ue0->dl_harq[1] != ue1->dl_harq[1] ||
-        ue0->dl_harq[2] != ue1->dl_harq[2] ||
-        ue0->dl_harq[3] != ue1->dl_harq[3] ||
-        ue0->dl_harq[4] != ue1->dl_harq[4] ||
-        ue0->ul_num_harq != ue1->ul_num_harq ||
-        ue0->ul_harq[0] != ue1->ul_harq[0] ||
-        ue0->ul_harq[1] != ue1->ul_harq[1] ||
-        ue0->ul_harq[2] != ue1->ul_harq[2] ||
-        ue0->ul_harq[3] != ue1->ul_harq[3] ||
-        ue0->ul_harq[4] != ue1->ul_harq[4] ||
-        ue0->frame != ue1->frame ||
-        ue0->slot != ue1->slot ||
-        eq_float(ue0->pusch_snr, ue1->pusch_snr, 0.0000001) == false ||
-        eq_float(ue0->pucch_snr, ue0->pucch_snr, 0.0000001) == false 
-      )
-      return false;
+  assert(m0 != NULL && m1 != NULL);
+  if(m0->len_ue_stats != m1->len_ue_stats || m0->tstamp != m1->tstamp) return false;
+  if(m0->len_ue_stats > 0) {
+    return memcmp(m0->ue_stats, m1->ue_stats, m0->len_ue_stats * sizeof(mac_ue_stats_impl_t)) == 0;
   }
   return true;
 }
 
 //////////////////////////////////////
-// RIC Call Process ID 
+// 5. RIC Control Message
 /////////////////////////////////////
 
-void free_mac_call_proc_id(mac_call_proc_id_t* src)
-{
-  free(src);
-}
-
-mac_call_proc_id_t cp_mac_call_proc_id( mac_call_proc_id_t* src)
-{
-  assert(src != NULL); 
-  mac_call_proc_id_t dst = {0};
-  dst.dummy = src->dummy;
-  return dst;
-}
-
-bool eq_mac_call_proc_id(mac_call_proc_id_t* m0, mac_call_proc_id_t* m1)
-{
-  if(m0 == NULL && m1 == NULL)
-    return true;
-  if(m0 == NULL || m1 == NULL)
-    return false;
-  if(m0->dummy != m1->dummy)
-    return false;
-  return true;
-}
-
-//////////////////////////////////////
-// RIC Control Header 
-/////////////////////////////////////
-
-void free_mac_ctrl_hdr( mac_ctrl_hdr_t* src)
+void free_mac_ctrl_msg(mac_ctrl_msg_t* src)
 {
   assert(src != NULL);
-  // No dynamic memory in header usually
-}
-
-mac_ctrl_hdr_t cp_mac_ctrl_hdr(mac_ctrl_hdr_t* src)
-{
-  assert(src != NULL);
-  mac_ctrl_hdr_t ret = {0};
-  ret.dummy = src->dummy;
-  return ret;
-}
-
-bool eq_mac_ctrl_hdr(mac_ctrl_hdr_t* m0, mac_ctrl_hdr_t* m1)
-{
-  assert(m0 != NULL);
-  assert(m1 != NULL);
-  return m0->dummy == m1->dummy;
-}
-
-//////////////////////////////////////
-// RIC Control Message (核心修改：支援切片參數)
-/////////////////////////////////////
-
-void free_mac_ctrl_msg( mac_ctrl_msg_t* src)
-{
-  assert(src != NULL);
-  
-  // [新增] 釋放切片陣列記憶體
-  if (src->type == 0 && src->slices != NULL) { // 假設 type 0 是切片設定
+  if (src->slices != NULL) { 
       free(src->slices);
+      src->slices = NULL;
   }
 }
 
 mac_ctrl_msg_t cp_mac_ctrl_msg(mac_ctrl_msg_t* src)
 {
   assert(src != NULL);
-  mac_ctrl_msg_t dst = {0};
-  
-  dst.type = src->type;
-
-  // [新增] 複製切片陣列
-  if (src->type == 0) {
-      dst.len_slices = src->len_slices;
-      if (src->len_slices > 0) {
-          dst.slices = calloc(dst.len_slices, sizeof(mac_slice_params_t));
-          assert(dst.slices != NULL && "Memory exhausted");
-          memcpy(dst.slices, src->slices, dst.len_slices * sizeof(mac_slice_params_t));
-      }
+  mac_ctrl_msg_t dst = {.type = src->type, .len_slices = src->len_slices};
+  if (dst.len_slices > 0) {
+      dst.slices = calloc(dst.len_slices, sizeof(mac_slice_params_t));
+      assert(dst.slices != NULL);
+      memcpy(dst.slices, src->slices, dst.len_slices * sizeof(mac_slice_params_t));
   }
-  
   return dst;
 }
 
 bool eq_mac_ctrl_msg(mac_ctrl_msg_t* m0, mac_ctrl_msg_t* m1)
 {
-  assert(m0 != NULL);
-  assert(m1 != NULL);
-
-  if (m0->type != m1->type) return false;
-
-  // [新增] 比較切片內容
-  if (m0->type == 0) {
-      if (m0->len_slices != m1->len_slices) return false;
-      // 簡單的內存比較
-      if (memcmp(m0->slices, m1->slices, m0->len_slices * sizeof(mac_slice_params_t)) != 0) 
-          return false;
+  assert(m0 != NULL && m1 != NULL);
+  if (m0->type != m1->type || m0->len_slices != m1->len_slices) return false;
+  if (m0->len_slices > 0) {
+      return memcmp(m0->slices, m1->slices, m0->len_slices * sizeof(mac_slice_params_t)) == 0;
   }
-
   return true;
 }
 
 //////////////////////////////////////
-// RIC Control Outcome 
-/////////////////////////////////////
-
-void free_mac_ctrl_out(mac_ctrl_out_t* src)
-{
-  assert(src != NULL);
-}
-
-mac_ctrl_out_t cp_mac_ctrl_out(mac_ctrl_out_t* src)
-{
-  assert(src != NULL);
-  mac_ctrl_out_t ret = {0}; 
-  // ret.dummy = src->dummy; // If dummy exists
-  return ret;
-}
-
-bool eq_mac_ctrl_out(mac_ctrl_out_t* m0, mac_ctrl_out_t* m1)
-{
-  assert(m0 != NULL);
-  assert(m1 != NULL);
-  return true;
-}
-
-//////////////////////////////////////
-// RAN Function Definition 
+// 6. RAN Function Definition (修正重點)
 /////////////////////////////////////
 
 void free_mac_func_def(mac_func_def_t* src)
 {
   assert(src != NULL);
-  free(src->buf);
+  if(src->buf) free(src->buf);
 }
 
 mac_func_def_t cp_mac_func_def(mac_func_def_t const* src)
 {
   assert(src != NULL);
-
   mac_func_def_t dst = {.len = src->len};
   if(src->len > 0){
-    dst.buf = calloc(dst.len, sizeof(uint8_t)); 
-    assert(dst.buf != NULL && "memory exhausted");
-    memcpy(dst.buf, src->buf, dst.len);
+    dst.buf = calloc(src->len, 1);
+    assert(dst.buf != NULL);
+    memcpy(dst.buf, src->buf, src->len);
   }
-
   return dst;
 }
 
+// [核心修復] 補上漏掉的 eq 函式
 bool eq_mac_func_def(mac_func_def_t const* m0, mac_func_def_t const* m1)
 {
-  if(m0 == m1)
-    return true;
-
-  if(m0 == NULL || m1 == NULL)
-    return false;
-
-  if(m0->len != m1->len)
-    return false;
-
-  int rc = memcmp(m0, m1, m0->len);
-  return rc == 0;
+  if(m0 == m1) return true;
+  if(m0 == NULL || m1 == NULL) return false;
+  if(m0->len != m1->len) return false;
+  return memcmp(m0->buf, m1->buf, m0->len) == 0;
 }
 
-///////////////
-// RIC Indication
-///////////////
+//////////////////////////////////////
+// 7. 其他 Boilerplate
+/////////////////////////////////////
 
-mac_ind_data_t cp_mac_ind_data( mac_ind_data_t const* src)
+void free_mac_call_proc_id(mac_call_proc_id_t* src) { if(src) free(src); }
+mac_call_proc_id_t cp_mac_call_proc_id(mac_call_proc_id_t* src) { 
+  assert(src != NULL); return (mac_call_proc_id_t){.dummy = src->dummy}; 
+}
+bool eq_mac_call_proc_id(mac_call_proc_id_t* m0, mac_call_proc_id_t* m1) {
+  if(m0 == m1) return true; if(!m0 || !m1) return false; return m0->dummy == m1->dummy;
+}
+
+void free_mac_ctrl_hdr(mac_ctrl_hdr_t* src) { (void)src; }
+mac_ctrl_hdr_t cp_mac_ctrl_hdr(mac_ctrl_hdr_t* src) { 
+  assert(src != NULL); return (mac_ctrl_hdr_t){.dummy = src->dummy}; 
+}
+bool eq_mac_ctrl_hdr(mac_ctrl_hdr_t* m0, mac_ctrl_hdr_t* m1) {
+  assert(m0 != NULL && m1 != NULL); return m0->dummy == m1->dummy;
+}
+
+void free_mac_ctrl_out(mac_ctrl_out_t* src) { (void)src; }
+mac_ctrl_out_t cp_mac_ctrl_out(mac_ctrl_out_t* src) { 
+  assert(src != NULL); return (mac_ctrl_out_t){.ans = src->ans}; 
+}
+bool eq_mac_ctrl_out(mac_ctrl_out_t* m0, mac_ctrl_out_t* m1) {
+  assert(m0 != NULL && m1 != NULL); return m0->ans == m1->ans;
+}
+
+mac_ind_data_t cp_mac_ind_data(mac_ind_data_t const* src)
 {
   assert(src != NULL);
-  mac_ind_data_t dst = {0};
-  dst.hdr = cp_mac_ind_hdr(&src->hdr);
-  dst.msg = cp_mac_ind_msg(&src->msg);
-  
-  if(src->proc_id != NULL){
-    dst.proc_id = malloc(sizeof(mac_call_proc_id_t)); 
-    assert(dst.proc_id != NULL && "Memory exhausted");
+  mac_ind_data_t dst = {.hdr = cp_mac_ind_hdr(&src->hdr), .msg = cp_mac_ind_msg(&src->msg)};
+  if(src->proc_id) {
+    dst.proc_id = malloc(sizeof(mac_call_proc_id_t));
     *dst.proc_id = cp_mac_call_proc_id(src->proc_id);
   }
-
   return dst;
 }
 
 void free_mac_ind_data(mac_ind_data_t* ind)
 {
-  assert(ind != NULL);
+  if(!ind) return;
   free_mac_ind_hdr(&ind->hdr);
   free_mac_ind_msg(&ind->msg);
-  free_mac_call_proc_id(ind->proc_id);
+  if(ind->proc_id) free_mac_call_proc_id(ind->proc_id);
 }

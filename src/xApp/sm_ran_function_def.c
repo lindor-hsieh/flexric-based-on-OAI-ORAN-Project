@@ -20,6 +20,7 @@
  */
 
 #include "sm_ran_function_def.h"
+#include "../sm/mac_sm/ie/mac_data_ie.h"
 #include <assert.h>
 
 void free_sm_ran_function_def(sm_ran_function_def_t* src)

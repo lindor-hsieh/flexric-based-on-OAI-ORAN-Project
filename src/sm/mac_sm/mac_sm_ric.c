@@ -23,6 +23,7 @@
 
 #include "mac_sm_ric.h"
 #include "mac_sm_id.h"
+#include "../sm_io.h"
 
 #include <assert.h>
 #include <stdlib.h>
@@ -243,13 +244,14 @@ void free_ric_service_update_mac_sm_ric(void* msg)
   assert(0!=0 && "Not implemented");
 }
 
+__attribute__((visibility("default")))
 
-sm_ric_t* make_mac_sm_ric(void /* sm_io_ric_t io */)
+sm_ric_t* make_mac_sm_ric(void)
 {
   sm_mac_ric_t* sm = calloc(1, sizeof(sm_mac_ric_t));
   assert(sm != NULL && "Memory exhausted");
-
-  *((uint16_t*)&sm->base.ran_func_id) = SM_MAC_ID; 
+  
+  *((uint16_t*)&sm->base.ran_func_id) = SM_MAC_ID;
 
   sm->base.free_sm = free_mac_sm_ric;
 
