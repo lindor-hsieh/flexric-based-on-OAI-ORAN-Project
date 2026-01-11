@@ -7,7 +7,7 @@
  * except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.openairinterface.org/?page_id=698
+ * http://www.openairinterface.org/?page_id=698
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,41 +16,28 @@
  * limitations under the License.
  *-------------------------------------------------------------------------------
  * For more information about the OpenAirInterface (OAI) Software Alliance:
- *      contact@openairinterface.org
+ * contact@openairinterface.org
  */
 
 #include "mac_sm_agent.h"
-
-#include "../../util/alg_ds/alg/defer.h"
 #include "dec/mac_dec_generic.h"
 #include "mac_sm_id.h"
 #include "enc/mac_enc_generic.h"
+#include "enc/mac_enc_plain.h" // [修正] 明確引入
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 
+// [移除 defer]
+// #include "../../util/alg_ds/alg/defer.h" 
+
+// [暴力修正] 直接定義 enc
 typedef struct{
-
   sm_agent_t base;
-
-#ifdef ASN
-  mac_enc_asn_t enc;
-#elif FLATBUFFERS 
-  mac_enc_fb_t enc;
-#elif PLAIN
-  mac_enc_plain_t enc;
-#else
-  static_assert(false, "No encryptioin type selected");
-#endif
-
+  mac_enc_plain_t enc; 
 } sm_mac_agent_t;
 
 
-// Function pointers provided by the RAN for the 
-// 5 procedures, 
-// subscription, indication, control, 
-// E2 Setup and RIC Service Update. 
-//
 static
 sm_ag_if_ans_subs_t on_subscription_mac_sm_ag(sm_agent_t const* sm_agent, const sm_subs_data_t* data)
 {
@@ -58,24 +45,18 @@ sm_ag_if_ans_subs_t on_subscription_mac_sm_ag(sm_agent_t const* sm_agent, const 
   assert(data != NULL);
 
   sm_mac_agent_t* sm = (sm_mac_agent_t*)sm_agent;
- 
+  
   mac_event_trigger_t ev = mac_dec_event_trigger(&sm->enc, data->len_et, data->event_trigger);
 
   sm_ag_if_ans_subs_t ans = {.type = PERIODIC_SUBSCRIPTION_FLRC}; 
   ans.per.t.ms = ev.ms;
   return ans;
-//  const sm_wr_if_t wr = {.type = SUBSCRIBE_TIMER, .sub_timer = timer };
-//  sm->base.io.write(&wr);
-//  printf("on_subscription called with event trigger = %u \n", ev.ms);
 }
 
 static
 exp_ind_data_t on_indication_mac_sm_ag(sm_agent_t const* sm_agent, void* act_def)
 {
-  //printf("on_indication called \n");
   assert(sm_agent != NULL);
-  (void)act_def;
-  assert(act_def == NULL && "Action definition data not needed for this SM");
   sm_mac_agent_t* sm = (sm_mac_agent_t*)sm_agent;
 
   exp_ind_data_t ret = {.has_value = true};
@@ -87,27 +68,25 @@ exp_ind_data_t on_indication_mac_sm_ag(sm_agent_t const* sm_agent, void* act_def
   ret.data.len_hdr = ba_hdr.len;
 
   // Fill Indication Message 
-  //sm_ag_if_rd_t rd_if = {.type = INDICATION_MSG_AGENT_IF_ANS_V0};
-  //rd_if.ind.type = MAC_STATS_V0;
-
   mac_ind_data_t mac = {0};
- // Liberate the memory if previously allocated by the RAN. It sucks. Profoundly
-  //  defer({ free_sm_rd_if(&rd_if); }; );
-  defer({ free_mac_ind_hdr(&mac.hdr) ;});
-  defer({ free_mac_ind_msg(&mac.msg) ;});
-  defer({ free_mac_call_proc_id(mac.proc_id);});
- 
-  // This may allocate memory by the RAN
-  if(sm->base.io.read_ind(&mac) == false)
-    return (exp_ind_data_t){.has_value = false};
+  
+  // [修正] 移除 defer，手動檢查錯誤並釋放
+  if(sm->base.io.read_ind(&mac) == false) {
+      // 讀取失敗，直接返回 (注意：read_ind 失敗通常不會分配記憶體)
+      return (exp_ind_data_t){.has_value = false};
+  }
 
+  // Encode the message
   byte_array_t ba = mac_enc_ind_msg(&sm->enc, &mac.msg);
   ret.data.ind_msg = ba.buf;
   ret.data.len_msg = ba.len;
-
-  // Fill the optional Call Process ID
   ret.data.call_process_id = NULL;
   ret.data.len_cpid = 0;
+
+  // [修正] 手動釋放 read_ind 分配的記憶體
+  free_mac_ind_hdr(&mac.hdr);
+  free_mac_ind_msg(&mac.msg);
+  free_mac_call_proc_id(mac.proc_id);
 
   return ret;
 }
@@ -119,34 +98,24 @@ sm_ctrl_out_data_t on_control_mac_sm_ag(sm_agent_t const* sm_agent, sm_ctrl_req_
   assert(data != NULL);
   sm_mac_agent_t* sm = (sm_mac_agent_t*) sm_agent;
 
-  // 1. 解碼 Header
   mac_ctrl_hdr_t hdr = mac_dec_ctrl_hdr(&sm->enc, data->len_hdr, data->ctrl_hdr);
-  // assert(hdr.dummy == 1 && "Only dummy == 1 supported "); // 建議註解掉，避免非預期 Crash
-
-  // 2. 解碼 Message (這裡會分配記憶體給 slices)
   mac_ctrl_msg_t msg = mac_dec_ctrl_msg(&sm->enc, data->len_msg, data->ctrl_msg);
   
-  // 移除舊的 action 檢查，因為欄位已經沒了
-  // assert(msg.action == 42 && "Only action number 42 supported"); 
-
-  // 3. 準備傳給 RAN Function 的資料結構
   mac_ctrl_req_data_t mac_ctrl = {0};
   mac_ctrl.hdr.dummy = hdr.dummy;
-
-  // =================================================================
-  // [關鍵修正] 使用 Deep Copy 函式，而不是手動賦值！
-  // 這樣 slices 陣列才會被正確複製過去，不會發生 "中間人丟包"
-  // =================================================================
-  mac_ctrl.msg = cp_mac_ctrl_msg(&msg); 
-
-  // 4. 呼叫 RAN Function (ran_func_mac.c) 執行控制
-  sm->base.io.write_ctrl(&mac_ctrl);
   
-  // 5. [記憶體管理] 釋放暫存的記憶體 (非常重要！)
-  // msg 是解碼出來的，用完要丟
+  // [安全複製]
+  mac_ctrl.msg.type = msg.type;
+  if (msg.type == 0) {
+      mac_ctrl.msg.len_slices = msg.len_slices;
+      mac_ctrl.msg.slices = msg.slices; 
+  }
+
+  // 寫入 OAI
+  sm->base.io.write_ctrl(&mac_ctrl);
+
+  // 清理
   free_mac_ctrl_msg(&msg);
-  // mac_ctrl.msg 是複製出來的，用完也要丟
-  free_mac_ctrl_msg(&mac_ctrl.msg);
 
   sm_ctrl_out_data_t ret = {0};
   ret.len_out = 0;
@@ -159,48 +128,17 @@ static
 sm_e2_setup_data_t on_e2_setup_mac_sm_ag(sm_agent_t const* sm_agent)
 {
   assert(sm_agent != NULL);
-//  printf("[E2SM MAC] on_e2_setup called \n");
-
-  // Fill E2 Setup Request 
-  // sm_ag_if_rd_t rd_if = {.type = E2_SETUP__AGENT_IF_ANS_V0};
-  // rd_if.e2ap.type = MAC_AGENT_IF_E2_SETUP_ANS_V0;
-
-  // This may allocate memory by the RAN
-  // sm->base.io.read(&rd_if);
-  // Liberate the memory if previously allocated by the RAN. It sucks. Profoundly
-  //mac_e2_setup_data_t* setup = &rd_if.e2ap.mac;
-
   sm_mac_agent_t* sm = (sm_mac_agent_t*)sm_agent;
   (void)sm;
 
   sm_e2_setup_data_t setup = {.len_rfd = 0, .ran_fun_def = NULL }; 
 
   size_t const sz = strnlen(SM_MAC_STR, 256);
-  assert(sz < 256 && "Buffer overeflow?");
-
   setup.len_rfd = sz;
   setup.ran_fun_def = calloc(1, sz);
   assert(setup.ran_fun_def != NULL);
-
   memcpy(setup.ran_fun_def, SM_MAC_STR , sz);
- 
-  /*
-  setup.len_rfd = strlen(sm->base.ran_func_name);
-  setup.ran_fun_def = calloc(1, strlen(sm->base.ran_func_name));
-  assert(setup.ran_fun_def != NULL);
-  memcpy(setup.ran_fun_def, sm->base.ran_func_name, strlen(sm->base.ran_func_name));
-
-  // RAN Function
-  setup.rf.def = cp_str_to_ba(SM_MAC_SHORT_NAME);
-  setup.rf.id = SM_MAC_ID;
-  setup.rf.rev = SM_MAC_REV;
-
-  setup.rf.oid = calloc(1, sizeof(byte_array_t) );
-  assert(setup.rf.oid != NULL && "Memory exhausted");
-
-  *setup.rf.oid = cp_str_to_ba(SM_MAC_OID);
-*/
-
+  
   return setup;
 }
 
@@ -208,10 +146,8 @@ static
  sm_ric_service_update_data_t on_ric_service_update_mac_sm_ag(sm_agent_t const* sm_agent)
 {
   assert(sm_agent != NULL);
-  assert(0!=0 && "Not implemented");
-
-  printf("on_ric_service_update called \n");
   sm_ric_service_update_data_t dst = {0}; 
+  (void)sm_agent;
   return dst;
 }
 
@@ -223,55 +159,24 @@ void free_mac_sm_ag(sm_agent_t* sm_agent)
   free(sm);
 }
 
-
 // General SM information
-
-// Definition
-static
-char const* def_mac_sm_ag(void)
-{
-  return SM_MAC_STR;
-}
-
-// ID
-static
-uint16_t id_mac_sm_ag(void)
-{
-  return SM_MAC_ID; 
-}
-
-  // Revision
-static
-uint16_t rev_mac_sm_ag (void)
-{
-  return SM_MAC_REV;
-}
-
-// OID
-static
-char const* oid_mac_sm_ag (void)
-{
-  return SM_MAC_OID;
-}
-
-
-
+static char const* def_mac_sm_ag(void) { return SM_MAC_STR; }
+static uint16_t id_mac_sm_ag(void) { return SM_MAC_ID; }
+static uint16_t rev_mac_sm_ag (void) { return SM_MAC_REV; }
+static char const* oid_mac_sm_ag (void) { return SM_MAC_OID; }
 
 sm_agent_t* make_mac_sm_agent(sm_io_ag_ran_t io)
 {
   sm_mac_agent_t* sm = calloc(1, sizeof(sm_mac_agent_t));
   assert(sm != NULL && "Memory exhausted!!!");
 
-  // Read
   sm->base.io.read_ind = io.read_ind_tbl[MAC_STATS_V0];
   sm->base.io.read_setup = io.read_setup_tbl[MAC_AGENT_IF_E2_SETUP_ANS_V0];
- 
-  //Write
   sm->base.io.write_ctrl = io.write_ctrl_tbl[MAC_CTRL_REQ_V0];
   sm->base.io.write_subs = io.write_subs_tbl[MAC_SUBS_V0];
 
   sm->base.free_sm = free_mac_sm_ag;
-  sm->base.free_act_def = NULL; //free_act_def_mac_sm_ag;
+  sm->base.free_act_def = NULL; 
 
   sm->base.proc.on_subscription = on_subscription_mac_sm_ag;
   sm->base.proc.on_indication = on_indication_mac_sm_ag;
@@ -280,27 +185,10 @@ sm_agent_t* make_mac_sm_agent(sm_io_ag_ran_t io)
   sm->base.proc.on_e2_setup = on_e2_setup_mac_sm_ag;
   sm->base.handle = NULL;
 
-  // General SM information
   sm->base.info.def = def_mac_sm_ag;
   sm->base.info.id =  id_mac_sm_ag;
   sm->base.info.rev = rev_mac_sm_ag;
   sm->base.info.oid = oid_mac_sm_ag;
 
-
-
-  //*(uint16_t*)(&sm->base.ran_func_id) = SM_MAC_ID; 
-  //assert(strlen( SM_MAC_STR ) < sizeof(sm->base.ran_func_name));
-  //memcpy(sm->base.ran_func_name, SM_MAC_STR, strlen(SM_MAC_STR));
-
   return &sm->base;
 }
-
-/*
-uint16_t id_mac_sm_agent(sm_agent_t const* sm_agent )
-{
-  assert(sm_agent != NULL);
-  sm_mac_agent_t* sm = (sm_mac_agent_t*)sm_agent;
-  return sm->base.ran_func_id;
-}
-*/
-

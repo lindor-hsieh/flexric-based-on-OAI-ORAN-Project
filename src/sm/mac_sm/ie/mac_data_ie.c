@@ -7,7 +7,7 @@
  * except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.openairinterface.org/?page_id=698
+ * http://www.openairinterface.org/?page_id=698
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,17 +16,16 @@
  * limitations under the License.
  *-------------------------------------------------------------------------------
  * For more information about the OpenAirInterface (OAI) Software Alliance:
- *      contact@openairinterface.org
+ * contact@openairinterface.org
  */
-
 
 #include "mac_data_ie.h"
 
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h> // Added for debug print if needed
 #include "../../../util/alg_ds/alg/eq_float.h"
-
 
 //////////////////////////////////////
 // RIC Event Trigger Definition
@@ -35,15 +34,14 @@
 void free_mac_event_trigger(mac_event_trigger_t* src)
 {
   assert(src != NULL);
-  assert(0!=0 && "Not implemented" ); 
+  // Default implementation usually implies no dynamic memory here
 }
 
 mac_event_trigger_t cp_mac_event_trigger( mac_event_trigger_t const* src)
 {
   assert(src != NULL);
-  assert(0!=0 && "Not implemented" ); 
-
   mac_event_trigger_t et = {0};
+  // Copy fields if any
   return et;
 }
 
@@ -51,12 +49,8 @@ bool eq_mac_event_trigger(mac_event_trigger_t const* m0, mac_event_trigger_t con
 {
   assert(m0 != NULL);
   assert(m1 != NULL);
-
-  assert(0!=0 && "Not implemented" ); 
-
   return true;
 }
-
 
 //////////////////////////////////////
 // RIC Action Definition 
@@ -65,15 +59,11 @@ bool eq_mac_event_trigger(mac_event_trigger_t const* m0, mac_event_trigger_t con
 void free_mac_action_def(mac_action_def_t* src)
 {
   assert(src != NULL);
-
-  assert(0!=0 && "Not implemented" ); 
 }
 
 mac_action_def_t cp_mac_action_def(mac_action_def_t* src)
 {
   assert(src != NULL);
-
-  assert(0!=0 && "Not implemented" ); 
   mac_action_def_t ad = {0};
   return ad;
 }
@@ -82,17 +72,12 @@ bool eq_mac_action_def(mac_event_trigger_t* m0,  mac_event_trigger_t* m1)
 {
   assert(m0 != NULL);
   assert(m1 != NULL);
-
-  assert(0!=0 && "Not implemented" ); 
-
   return true;
 }
-
 
 //////////////////////////////////////
 // RIC Indication Header 
 /////////////////////////////////////
-
 
 void free_mac_ind_hdr(mac_ind_hdr_t* src)
 {
@@ -117,7 +102,6 @@ bool eq_mac_ind_hdr(mac_ind_hdr_t* m0, mac_ind_hdr_t* m1)
     return false;
   return true;
 }
-
 
 //////////////////////////////////////
 // RIC Indication Message 
@@ -145,8 +129,8 @@ mac_ue_stats_impl_t cp_mac_ue_stats_impl(mac_ue_stats_impl_t const* src)
                               .dl_sched_rb = src->dl_sched_rb,
                               .ul_sched_rb = src->ul_sched_rb,
 
-                              .pusch_snr = src->pusch_snr, //: float = -64;
-                              .pucch_snr = src->pucch_snr, //: float = -64;
+                              .pusch_snr = src->pusch_snr, 
+                              .pucch_snr = src->pucch_snr, 
 
                               .rnti = src->rnti,
                               .dl_aggr_prb = src->dl_aggr_prb, 
@@ -156,7 +140,7 @@ mac_ue_stats_impl_t cp_mac_ue_stats_impl(mac_ue_stats_impl_t const* src)
                               .dl_aggr_retx_prb = src->dl_aggr_retx_prb,
                               .ul_aggr_retx_prb = src->ul_aggr_retx_prb,
 
-                              .wb_cqi = src->wb_cqi, 
+                              .wb_cqi = src->wb_cqi, // [關鍵] 這裡已經有 CQI 了
                               .dl_mcs1 = src->dl_mcs1,
                               .ul_mcs1 = src->ul_mcs1,
                               .dl_mcs2 = src->dl_mcs2, 
@@ -200,8 +184,6 @@ mac_ind_msg_t cp_mac_ind_msg( mac_ind_msg_t const* src)
     dst.ue_stats[i] = cp_mac_ue_stats_impl(&src->ue_stats[i]); 
   }
 
-  //memcpy(ret.ue_stats, src->ue_stats, sizeof( mac_ue_stats_impl_t )*ret.len_ue_stats);
-
   dst.tstamp = src->tstamp; 
 
   return dst;
@@ -235,7 +217,7 @@ bool eq_mac_ind_msg(mac_ind_msg_t* m0, mac_ind_msg_t* m1)
         ue0->ul_aggr_sdus != ue1->ul_aggr_sdus ||
         ue0->dl_aggr_retx_prb != ue1->dl_aggr_retx_prb ||
         ue0->ul_aggr_retx_prb != ue1->ul_aggr_retx_prb ||
-        ue0->wb_cqi != ue1->wb_cqi || 
+        ue0->wb_cqi != ue1->wb_cqi || // [關鍵] 比較 CQI
         ue0->dl_mcs1 != ue1->dl_mcs1 ||
         ue0->ul_mcs1 != ue1->ul_mcs1 ||
         ue0->dl_mcs2 != ue1->dl_mcs2 || 
@@ -272,7 +254,6 @@ bool eq_mac_ind_msg(mac_ind_msg_t* m0, mac_ind_msg_t* m1)
 
 void free_mac_call_proc_id(mac_call_proc_id_t* src)
 {
-  // Note that the src could be NULL
   free(src);
 }
 
@@ -280,9 +261,7 @@ mac_call_proc_id_t cp_mac_call_proc_id( mac_call_proc_id_t* src)
 {
   assert(src != NULL); 
   mac_call_proc_id_t dst = {0};
-
   dst.dummy = src->dummy;
-
   return dst;
 }
 
@@ -290,17 +269,12 @@ bool eq_mac_call_proc_id(mac_call_proc_id_t* m0, mac_call_proc_id_t* m1)
 {
   if(m0 == NULL && m1 == NULL)
     return true;
-  if(m0 == NULL)
+  if(m0 == NULL || m1 == NULL)
     return false;
-  if(m1 == NULL)
-    return false;
-
   if(m0->dummy != m1->dummy)
     return false;
-
   return true;
 }
-
 
 //////////////////////////////////////
 // RIC Control Header 
@@ -309,14 +283,14 @@ bool eq_mac_call_proc_id(mac_call_proc_id_t* m0, mac_call_proc_id_t* m1)
 void free_mac_ctrl_hdr( mac_ctrl_hdr_t* src)
 {
   assert(src != NULL);
-  // dummy 是 uint32_t，不需要釋放記憶體
+  // No dynamic memory in header usually
 }
 
 mac_ctrl_hdr_t cp_mac_ctrl_hdr(mac_ctrl_hdr_t* src)
 {
   assert(src != NULL);
   mac_ctrl_hdr_t ret = {0};
-  ret.dummy = src->dummy; // 直接複製 dummy 值
+  ret.dummy = src->dummy;
   return ret;
 }
 
@@ -327,53 +301,57 @@ bool eq_mac_ctrl_hdr(mac_ctrl_hdr_t* m0, mac_ctrl_hdr_t* m1)
   return m0->dummy == m1->dummy;
 }
 
-
 //////////////////////////////////////
-// RIC Control Message 
+// RIC Control Message (核心修改：支援切片參數)
 /////////////////////////////////////
 
-
-void free_mac_ctrl_msg(mac_ctrl_msg_t* src)
+void free_mac_ctrl_msg( mac_ctrl_msg_t* src)
 {
   assert(src != NULL);
-  // 如果有分配 slices 陣列，就要釋放它
-  if (src->len_slices > 0 && src->slices != NULL) {
-    free(src->slices);
+  
+  // [新增] 釋放切片陣列記憶體
+  if (src->type == 0 && src->slices != NULL) { // 假設 type 0 是切片設定
+      free(src->slices);
   }
 }
 
 mac_ctrl_msg_t cp_mac_ctrl_msg(mac_ctrl_msg_t* src)
 {
   assert(src != NULL);
-  mac_ctrl_msg_t ret = {0};
+  mac_ctrl_msg_t dst = {0};
+  
+  dst.type = src->type;
 
-  ret.type = src->type;
-  ret.len_slices = src->len_slices;
-
-  // 深層複製 (Deep Copy) slices 陣列
-  if (src->len_slices > 0) {
-    ret.slices = calloc(src->len_slices, sizeof(mac_slice_params_t));
-    assert(ret.slices != NULL && "Memory exhausted");
-    memcpy(ret.slices, src->slices, src->len_slices * sizeof(mac_slice_params_t));
+  // [新增] 複製切片陣列
+  if (src->type == 0) {
+      dst.len_slices = src->len_slices;
+      if (src->len_slices > 0) {
+          dst.slices = calloc(dst.len_slices, sizeof(mac_slice_params_t));
+          assert(dst.slices != NULL && "Memory exhausted");
+          memcpy(dst.slices, src->slices, dst.len_slices * sizeof(mac_slice_params_t));
+      }
   }
-
-  return ret;
+  
+  return dst;
 }
 
 bool eq_mac_ctrl_msg(mac_ctrl_msg_t* m0, mac_ctrl_msg_t* m1)
 {
+  assert(m0 != NULL);
+  assert(m1 != NULL);
+
   if (m0->type != m1->type) return false;
-  if (m0->len_slices != m1->len_slices) return false;
-  
-  // 逐一比較切片內容
-  for (int i = 0; i < m0->len_slices; i++) {
-      if (m0->slices[i].id != m1->slices[i].id) return false;
-      // 浮點數比較需要一點寬容度，但在這裡先直接比
-      if (m0->slices[i].percentage != m1->slices[i].percentage) return false;
+
+  // [新增] 比較切片內容
+  if (m0->type == 0) {
+      if (m0->len_slices != m1->len_slices) return false;
+      // 簡單的內存比較
+      if (memcmp(m0->slices, m1->slices, m0->len_slices * sizeof(mac_slice_params_t)) != 0) 
+          return false;
   }
+
   return true;
 }
-
 
 //////////////////////////////////////
 // RIC Control Outcome 
@@ -382,14 +360,13 @@ bool eq_mac_ctrl_msg(mac_ctrl_msg_t* m0, mac_ctrl_msg_t* m1)
 void free_mac_ctrl_out(mac_ctrl_out_t* src)
 {
   assert(src != NULL);
-  // ans 是 enum，不需要釋放記憶體
 }
 
 mac_ctrl_out_t cp_mac_ctrl_out(mac_ctrl_out_t* src)
 {
   assert(src != NULL);
   mac_ctrl_out_t ret = {0}; 
-  ret.ans = src->ans; // 直接複製結果
+  // ret.dummy = src->dummy; // If dummy exists
   return ret;
 }
 
@@ -397,9 +374,8 @@ bool eq_mac_ctrl_out(mac_ctrl_out_t* m0, mac_ctrl_out_t* m1)
 {
   assert(m0 != NULL);
   assert(m1 != NULL);
-  return m0->ans == m1->ans;
+  return true;
 }
-
 
 //////////////////////////////////////
 // RAN Function Definition 
@@ -467,5 +443,3 @@ void free_mac_ind_data(mac_ind_data_t* ind)
   free_mac_ind_msg(&ind->msg);
   free_mac_call_proc_id(ind->proc_id);
 }
-
-

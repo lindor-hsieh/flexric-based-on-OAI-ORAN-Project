@@ -7,18 +7,17 @@
  * except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.openairinterface.org/?page_id=698
+ * http://www.openairinterface.org/?page_id=698
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
- * limitations under the License.a
+ * limitations under the License.
  *-------------------------------------------------------------------------------
  * For more information about the OpenAirInterface (OAI) Software Alliance:
- *      contact@openairinterface.org
+ * contact@openairinterface.org
  */
-
 
 #ifndef MAC_DATA_INFORMATION_ELEMENTS_H
 #define MAC_DATA_INFORMATION_ELEMENTS_H
@@ -30,7 +29,6 @@ extern "C" {
 /*
  * 9 Information Elements (IE) , RIC Event Trigger Definition, RIC Action Definition, RIC Indication Header, RIC Indication Message, RIC Call Process ID, RIC Control Header, RIC Control Message, RIC Control Outcome and RAN Function Definition defined by ORAN-WG3.E2SM-v01.00.00 at Section 5
  */
-
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -50,12 +48,9 @@ mac_event_trigger_t cp_mac_event_trigger( mac_event_trigger_t const* src);
 
 bool eq_mac_event_trigger(mac_event_trigger_t const* m0, mac_event_trigger_t const* m1);
 
-
-
 //////////////////////////////////////
 // RIC Action Definition 
 /////////////////////////////////////
-
 
 typedef struct {
   uint32_t dummy;  
@@ -67,12 +62,9 @@ mac_action_def_t cp_mac_action_def(mac_action_def_t* src);
 
 bool eq_mac_action_def(mac_event_trigger_t* m0,  mac_event_trigger_t* m1);
 
-
-
 //////////////////////////////////////
 // RIC Indication Header 
 /////////////////////////////////////
-
 
 typedef struct{
   uint32_t dummy;  
@@ -98,9 +90,9 @@ typedef struct
   uint64_t ul_curr_tbs;
   uint64_t dl_sched_rb;
   uint64_t ul_sched_rb;
- 
-  float pusch_snr; //: float = -64;
-  float pucch_snr; //: float = -64;
+  
+  float pusch_snr; 
+  float pucch_snr; 
 
   float dl_bler;
   float ul_bler;
@@ -122,7 +114,7 @@ typedef struct
   uint16_t frame;
   uint16_t slot;
 
-  uint8_t wb_cqi; 
+  uint8_t wb_cqi; // [CQI] 這裡已經有 CQI 欄位，無需修改
   uint8_t dl_mcs1;
   uint8_t ul_mcs1;
   uint8_t dl_mcs2; 
@@ -144,7 +136,6 @@ void free_mac_ind_msg(mac_ind_msg_t* src);
 mac_ind_msg_t cp_mac_ind_msg(mac_ind_msg_t const* src);
 
 bool eq_mac_ind_msg(mac_ind_msg_t* m0, mac_ind_msg_t* m1);
-
 
 //////////////////////////////////////
 // RIC Call Process ID 
@@ -175,23 +166,20 @@ mac_ctrl_hdr_t cp_mac_ctrl_hdr(mac_ctrl_hdr_t* src);
 bool eq_mac_ctrl_hdr(mac_ctrl_hdr_t* m0, mac_ctrl_hdr_t* m1);
 
 //////////////////////////////////////
-// RIC Control Message 
+// RIC Control Message (核心修改區域)
 /////////////////////////////////////
 
-// 1. 先定義切片參數結構
+// [新增] 切片參數結構
 typedef struct {
-  uint8_t  id;          // 切片 ID (1, 2...)
-  float    percentage;  // 資源比例 (0.7, 0.3...)
+  uint32_t id;       // Slice ID (e.g., 1=VIP, 2=STD)
+  float percentage;  // 配額比例 (e.g., 0.7)
 } mac_slice_params_t;
 
+// [修改] 控制訊息結構，加入切片陣列
 typedef struct {
-  // uint32_t action;
-  // 新增類型標記 (0: 設定切片, 1: 綁定 UE...)
-  uint8_t type; 
-
-  // 切片設定 payload
-  uint8_t len_slices;          // 有幾個切片？
-  mac_slice_params_t* slices;  // <--- 這裡使用了上面定義的結構
+  uint8_t type;      // 0 = Slice Config
+  uint32_t len_slices;
+  mac_slice_params_t* slices; // 動態陣列
 } mac_ctrl_msg_t;
 
 void free_mac_ctrl_msg( mac_ctrl_msg_t* src); 
@@ -200,15 +188,12 @@ mac_ctrl_msg_t cp_mac_ctrl_msg(mac_ctrl_msg_t* src);
 
 bool eq_mac_ctrl_msg(mac_ctrl_msg_t* m0, mac_ctrl_msg_t* m1);
 
-
 //////////////////////////////////////
 // RIC Control Outcome 
 /////////////////////////////////////
 
 typedef enum{
   MAC_CTRL_OUT_OK,
-
-
   MAC_CTRL_OUT_END
 } mac_ctrl_out_e;
 
@@ -221,7 +206,6 @@ void free_mac_ctrl_out(mac_ctrl_out_t* src);
 mac_ctrl_out_t cp_mac_ctrl_out(mac_ctrl_out_t* src);
 
 bool eq_mac_ctrl_out(mac_ctrl_out_t* m0, mac_ctrl_out_t* m1);
-
 
 //////////////////////////////////////
 // RAN Function Definition 
@@ -238,16 +222,13 @@ mac_func_def_t cp_mac_func_def(mac_func_def_t const* src);
 
 bool eq_mac_func_def(mac_func_def_t const* m0, mac_func_def_t const* m1);
 
-
 /////////////////////////////////////////////////
 //////////////////////////////////////////////////
 /////////////////////////////////////////////////
 
-
 /*
  * O-RAN defined 5 Procedures: RIC Subscription, RIC Indication, RIC Control, E2 Setup and RIC Service Update 
  * */
-
 
 ///////////////
 /// RIC Subscription
@@ -305,8 +286,4 @@ typedef struct{
 }
 #endif
 
-
-
-
 #endif
-
