@@ -54,7 +54,7 @@
  * =========================================================================== */
 
 /* 鎖定目標節點 ID (Node 3 的 nb_id，由 FlexRIC Server 分配) */
-const uint32_t TARGET_NODE_ID = 4046;
+const uint32_t TARGET_NODE_ID = 3587;
 
 /* ZMQ IPC 路徑：Python 推論伺服器監聽此位址 */
 #define ZMQ_ENDPOINT      "ipc:///tmp/zmq_node3_inference.ipc"
