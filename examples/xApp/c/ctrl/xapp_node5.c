@@ -163,33 +163,16 @@ static bool zmq_socket_init(void)
  * =========================================================================== */
 static void apply_fallback(uint32_t num_ues, mac_ue_stats_impl_t const *stats)
 {
-    /* 限制最大 UE 數，避免 calloc 過大 */
-    uint32_t n = (num_ues > MAX_UE_COUNT) ? (uint32_t)MAX_UE_COUNT : num_ues;
-
-    mac_ctrl_req_data_t req = {0};
-    req.hdr.dummy      = 0;
-    req.msg.type       = 0;   /* 0 = Resource Allocation */
-    req.msg.len_slices = n;
-    req.msg.slices     = calloc(n, sizeof(mac_slice_params_t));
-    if (req.msg.slices == NULL) {
-        fprintf(stderr, CLR_RED "[Node5 xApp] Fallback: calloc 失敗，跳過本輪控制\n" CLR_RESET);
-        return;
-    }
-
-    /* 等比例分配：每個 UE 得到 1/n 的 PRB 配額 */
-    float equal_ratio = 1.0f / (float)n;
-    for (uint32_t i = 0; i < n; i++) {
-        req.msg.slices[i].id        = stats[i].rnti;
-        req.msg.slices[i].prb_quota = equal_ratio;
-        req.msg.slices[i].slot_mask = SLOT_MASK_FULL;
-        req.msg.slices[i].priority  = 0;
-    }
-
-    /* 下發控制訊息 */
-    control_sm_xapp_api(g_target_node_id, SM_MAC_ID, &req);
-
-    /* 釋放動態分配的切片陣列，防止 Memory Leak */
-    free(req.msg.slices);
+    /*
+     * Python 推論伺服器未回應時，不送出任何控制訊息。
+     * 退回 OAI 預設排程器 (Proportional Fairness) 自行處理 PRB 分配。
+     *
+     * 原因：若在 Fallback 時仍呼叫 control_sm_xapp_api()，5 個 xApp 合計
+     * 每秒產生 ~500 個 CONTROL-REQUEST，會把 FlexRIC 的 pending event queue
+     * 打爆，導致 "Pending event timeout" → E42 連線斷開 → FlexRIC crash。
+     */
+    (void)num_ues;
+    (void)stats;
 }
 
 /* =============================================================================
