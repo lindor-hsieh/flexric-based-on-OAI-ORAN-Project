@@ -24,6 +24,7 @@
 #include <arpa/inet.h>   // for inet_pton
 #include <assert.h>      // for assert
 #include <errno.h>       // for errno
+#include <pthread.h>     // for pthread_mutex_lock/unlock
 //#include <linux/sctp.h>  // for sctp_event_subscribe, SCTP_AUTOCLOSE, SCTP_E...
 #include <netinet/sctp.h>
 #include <netinet/in.h>  // for sockaddr_in, IPPROTO_SCTP, htons, sockaddr_in6
@@ -111,25 +112,68 @@ sctp_msg_t e2ap_recv_msg_iapp(e2ap_ep_iapp_t* ep)
   return rcv;
 }
 
+// Send a message to a specific xApp identified by sinfo_assoc_id.
+// When assoc_id != 0, the kernel routes by association (ignores msg_name),
+// so all xApps sharing the same source IP are correctly distinguished.
+// When assoc_id == 0, falls back to msg_name address routing (xApp-to-RIC direction).
+static void send_iapp_by_assoc(int fd, pthread_mutex_t* mtx,
+                                byte_array_t ba,
+                                struct sctp_sndrcvinfo const* sri)
+{
+  struct iovec iov = {.iov_base = (void*)ba.buf, .iov_len = ba.len};
+  char cbuf[CMSG_SPACE(sizeof(struct sctp_sndrcvinfo))];
+  memset(cbuf, 0, sizeof(cbuf));
+  struct msghdr mhdr = {0};
+  mhdr.msg_iov        = &iov;
+  mhdr.msg_iovlen     = 1;
+  // Do NOT set msg_name when assoc_id is known: setting msg_name with port=0
+  // alongside a valid assoc_id can trigger EINVAL on Linux ≥ 5.x SCTP.
+  mhdr.msg_name       = NULL;
+  mhdr.msg_namelen    = 0;
+  mhdr.msg_control    = cbuf;
+  mhdr.msg_controllen = sizeof(cbuf);
+
+  struct cmsghdr* cmsg = CMSG_FIRSTHDR(&mhdr);
+  cmsg->cmsg_level = IPPROTO_SCTP;
+  cmsg->cmsg_type  = SCTP_SNDRCV;
+  cmsg->cmsg_len   = CMSG_LEN(sizeof(struct sctp_sndrcvinfo));
+  struct sctp_sndrcvinfo* sndrcv = (struct sctp_sndrcvinfo*)CMSG_DATA(cmsg);
+  sndrcv->sinfo_stream   = sri->sinfo_stream;
+  sndrcv->sinfo_flags    = sri->sinfo_flags;
+  sndrcv->sinfo_ppid     = sri->sinfo_ppid;
+  sndrcv->sinfo_assoc_id = sri->sinfo_assoc_id;
+
+  pthread_mutex_lock(mtx);
+  ssize_t const rc = sendmsg(fd, &mhdr, 0);
+  pthread_mutex_unlock(mtx);
+  if (rc == -1) {
+    printf("[iApp]: sendmsg failed (assoc_id=%d errno=%d)\n",
+           sri->sinfo_assoc_id, errno);
+  }
+}
+
 void e2ap_send_bytes_iapp(const e2ap_ep_iapp_t* ep, int xapp_id, byte_array_t ba)
 {
   assert(ba.buf && ba.len > 0);
   assert(ep != NULL);
 
   sctp_msg_t msg = {.ba = ba};
-
   msg.info = find_map_xapps_sad((map_xapps_sockaddr_t*)&ep->xapps, xapp_id);
 
-  e2ap_send_sctp_msg(&ep->base, &msg);
+  // Use assoc_id routing so MAC indications reach the correct xApp even when
+  // multiple xApps share the same source IP (macvlan-br).
+  send_iapp_by_assoc(ep->base.fd, &((e2ap_ep_iapp_t*)ep)->base.mtx,
+                     ba, &msg.info.sri);
 }
 
 
-void e2ap_send_sctp_msg_iapp(const e2ap_ep_iapp_t* ep,sctp_msg_t* msg)
+void e2ap_send_sctp_msg_iapp(const e2ap_ep_iapp_t* ep, sctp_msg_t* msg)
 {
   assert(ep != NULL);
   assert(msg->ba.buf && msg->ba.len > 0);
 
-  e2ap_send_sctp_msg(&ep->base, msg);
+  send_iapp_by_assoc(ep->base.fd, &((e2ap_ep_iapp_t*)ep)->base.mtx,
+                     msg->ba, &msg->info.sri);
 }
 
 

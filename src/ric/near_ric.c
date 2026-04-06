@@ -455,8 +455,17 @@ void e2_event_loop_ric(near_ric_t* ric)
           }
         case PENDING_EVENT:
           {
-            printf("Pending event timeout happened. Communication with E2 Node lost?\n");
-            consume_fd(e.fd);
+            printf("[NEAR-RIC]: WARNING: Pending event timeout. Disarming timer.\n");
+            // Remove the bimap entry first so stop_pending_event (if ACK arrives late)
+            // will see a NULL fd and skip rm_fd_asio_ric safely.
+            {
+              int tmp_fd = e.fd;
+              pthread_mutex_lock(&ric->pend_mtx);
+              bi_map_extract_left(&ric->pending, &tmp_fd, sizeof(tmp_fd), NULL);
+              pthread_mutex_unlock(&ric->pend_mtx);
+            }
+            // Remove from epoll and close the timerfd so it stops firing.
+            rm_fd_asio_ric(&ric->io, e.fd);
 
             break;
           }

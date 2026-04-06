@@ -152,10 +152,12 @@ e2ap_msg_t e2ap_msg_handle_xapp(e42_xapp_t* xapp, const e2ap_msg_t* msg)
 
   pending_event_xapp_t ev = {.ev = E42_RIC_SUBSCRIPTION_REQUEST_PENDING_EVENT,
                              .id = rv.val.id};
-  // Remove pending event  
-  rm_pending_event_xapp(xapp, &ev);
+  // Remove pending event (if still present — timeout handler may have already disarmed it)
+  if(find_pending_event_ev(&xapp->pending, &ev)){
+    rm_pending_event_xapp(xapp, &ev);
+  }
 
-  // Unblock UI thread  
+  // Unblock UI thread
   signal_sync_ui(&xapp->sync);
 
   e2ap_msg_t ans = {.type = NONE_E2_MSG_TYPE};
@@ -190,10 +192,12 @@ e2ap_msg_t e2ap_msg_handle_xapp(e42_xapp_t* xapp, const e2ap_msg_t* msg)
 
   pending_event_xapp_t ev = {.ev = E42_RIC_SUBSCRIPTION_DELETE_REQUEST_PENDING_EVENT, .id = rv.val.id };
 
-  // Stop the timer
-  rm_pending_event_xapp(xapp, &ev);
+  // Stop the timer (if still present — timeout handler may have already disarmed it)
+  if(find_pending_event_ev(&xapp->pending, &ev)){
+    rm_pending_event_xapp(xapp, &ev);
+  }
 
-  // Unblock UI thread  
+  // Unblock UI thread
   signal_sync_ui(&xapp->sync);
 
   e2ap_msg_t ans = {.type = NONE_E2_MSG_TYPE};
@@ -292,14 +296,14 @@ sm_ind_data_t ind_sm_payload(ric_indication_t const* src)
 
   printf("[xApp]: CONTROL ACK rx\n");
 
-  // A pending event is created along with a timer of 5000 ms,
-  // after which an event will be generated
   pending_event_xapp_t ev = {.ev = E42_RIC_CONTROL_REQUEST_PENDING_EVENT, .id = rv.val.id };
 
-  // Stop the timer
-  rm_pending_event_xapp(xapp, &ev);
+  // Stop the timer (if still present — timeout handler may have already disarmed it)
+  if(find_pending_event_ev(&xapp->pending, &ev)){
+    rm_pending_event_xapp(xapp, &ev);
+  }
 
-  // Unblock UI thread  
+  // Unblock UI thread
   signal_sync_ui(&xapp->sync);
 
   // If the answer of control_ack is needed 
@@ -497,11 +501,12 @@ e2ap_msg_t e2ap_handle_e42_setup_request_xapp(struct e42_xapp_s* xapp, const str
 
   printf("[xApp]: E42 SETUP-REQUEST tx\n");
 
-  // A pending event is created along with a timer of 1000 ms,
-  // after which an event will be triggered
+  // A pending event is created along with a timer.
+  // Increased from 1500ms to 10000ms to tolerate FlexRIC iApp latency
+  // when multiple xApps connect simultaneously (single-threaded event loop).
   pending_event_xapp_t x_ev = {.ev = E42_SETUP_REQUEST_PENDING_EVENT,
-                                .wait_ms = 1000,
-                               .id = {0} }; 
+                                .wait_ms = 10000,
+                               .id = {0} };
   add_pending_event_xapp(xapp, &x_ev);
 
   e2ap_msg_t ans = {.type = NONE_E2_MSG_TYPE };
@@ -522,9 +527,9 @@ e2ap_msg_t e2ap_handle_e42_ric_subscription_request_xapp(struct e42_xapp_s* xapp
   // A pending event is created along with a timer of 5000 ms,
   // after which an event will be triggered. The answer needs to arrive before 
   // the timer expires
-  pending_event_xapp_t ev = {.ev = E42_RIC_SUBSCRIPTION_REQUEST_PENDING_EVENT, 
+  pending_event_xapp_t ev = {.ev = E42_RIC_SUBSCRIPTION_REQUEST_PENDING_EVENT,
                               .id = e42_sr->sr.ric_id,
-                              .wait_ms = 5000};
+                              .wait_ms = 60000};
   add_pending_event_xapp(xapp, &ev);
 
 
@@ -581,7 +586,7 @@ e2ap_msg_t e2ap_handle_e42_ric_control_request_xapp(e42_xapp_t* xapp, const e2ap
 
   pending_event_xapp_t ev = {.ev = E42_RIC_CONTROL_REQUEST_PENDING_EVENT,
     .id = cr->ctrl_req.ric_id,
-    .wait_ms = 10000};
+    .wait_ms = 15000};
   add_pending_event_xapp(xapp, &ev);
 
 

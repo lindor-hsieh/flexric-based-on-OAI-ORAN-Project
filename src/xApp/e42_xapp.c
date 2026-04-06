@@ -289,26 +289,41 @@ void e2_event_loop_xapp(e42_xapp_t* xapp)
         e2ap_send_bytes_xapp(&xapp->ep, ba_ans);
       }
     } else if(e.type == PENDING_EVENT){
-      assert(( *e.p_ev == E42_SETUP_REQUEST_PENDING_EVENT 
-            || *e.p_ev == E42_RIC_SUBSCRIPTION_REQUEST_PENDING_EVENT
-            || *e.p_ev == E42_RIC_SUBSCRIPTION_DELETE_REQUEST_PENDING_EVENT 
-            || *e.p_ev == E42_RIC_CONTROL_REQUEST_PENDING_EVENT ) && "Unforeseen pending event happened!" );
+      // In Release builds assert() is a no-op, so we must use explicit if/else
+      // to handle each pending event type correctly.
+      if(*e.p_ev == E42_RIC_SUBSCRIPTION_REQUEST_PENDING_EVENT){
+        // Subscription response timed out. Disarm the periodic timer so it
+        // does not fire again every 60s. If the response arrives later, the
+        // subscription response handler guards against removing a missing entry.
+        printf("[E2AP]: WARNING: Timeout waiting for RIC_SUBSCRIPTION_RESPONSE. Disarming timer.\n");
+        rm_pending_event_fd(&xapp->pending, fd);
+        rm_fd_asio_xapp(&xapp->io, fd);
+      } else if(*e.p_ev == E42_RIC_SUBSCRIPTION_DELETE_REQUEST_PENDING_EVENT){
+        printf("[E2AP]: WARNING: Timeout waiting for RIC_SUBSCRIPTION_DELETE_RESPONSE. Disarming timer.\n");
+        rm_pending_event_fd(&xapp->pending, fd);
+        rm_fd_asio_xapp(&xapp->io, fd);
+      } else if(*e.p_ev == E42_RIC_CONTROL_REQUEST_PENDING_EVENT){
+        // Control ACK timed out (e.g., DU on remote host is slow or unreachable).
+        // Disarm the timer and continue the control loop — do NOT resend setup.
+        printf("[E2AP]: WARNING: Timeout waiting for CONTROL_ACK. DU unreachable? Disarming timer.\n");
+        rm_pending_event_fd(&xapp->pending, fd);
+        rm_fd_asio_xapp(&xapp->io, fd);
+      } else if(*e.p_ev == E42_SETUP_REQUEST_PENDING_EVENT){
+        // Genuine setup request timeout — resend.
+        e42_setup_request_t sr = generate_e42_setup_request(xapp);
+        defer({ e2ap_free_e42_setup_request(&sr); });
 
-      assert(*e.p_ev != E42_RIC_SUBSCRIPTION_REQUEST_PENDING_EVENT && "Timeout waiting for Report. Connection lost with the RIC?");
-      assert(*e.p_ev != E42_RIC_SUBSCRIPTION_DELETE_REQUEST_PENDING_EVENT  && "Timeout waiting for Subscription Delete. Connection lost with the RIC?");
-      assert(*e.p_ev != E42_RIC_CONTROL_REQUEST_PENDING_EVENT && "Timeout waiting for Control ACK. Connection lost with the RIC?");
+        printf("[E2AP]: Resending Setup Request after timeout\n");
+        byte_array_t ba = e2ap_enc_e42_setup_request_xapp(&xapp->ap, &sr);
+        defer({free_byte_array(ba); });
 
-      // Resend the subscription request message
-      e42_setup_request_t sr = generate_e42_setup_request(xapp);
-      defer({ e2ap_free_e42_setup_request(&sr);  } );
-
-      printf("[E2AP]: Resending Setup Request after timeout\n");
-      byte_array_t ba = e2ap_enc_e42_setup_request_xapp(&xapp->ap, &sr);
-      defer({free_byte_array(ba); } );
-
-      e2ap_send_bytes_xapp(&xapp->ep, ba);
-
-      consume_fd(fd);
+        e2ap_send_bytes_xapp(&xapp->ep, ba);
+        consume_fd(fd);
+      } else {
+        printf("[E2AP]: ERROR: Unknown pending event type %d, disarming timer.\n", (int)*e.p_ev);
+        rm_pending_event_fd(&xapp->pending, fd);
+        rm_fd_asio_xapp(&xapp->io, fd);
+      }
     } else {
       assert(0!=0 && "An interruption that it is not a network pkt, or a timer expired pending event happened!");
     }

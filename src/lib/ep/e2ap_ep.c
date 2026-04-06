@@ -59,7 +59,7 @@ void e2ap_send_sctp_msg(const e2ap_ep_t* ep, sctp_msg_t* msg)
   assert(ep != NULL);
   assert(msg->ba.buf && msg->ba.len > 0);
 
-  struct sockaddr_in const* addr = &msg->info.addr; 
+  struct sockaddr_in const* addr = &msg->info.addr;
   struct sctp_sndrcvinfo const* sri = &msg->info.sri;
   byte_array_t const ba = msg->ba;
 

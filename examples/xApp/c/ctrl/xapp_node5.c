@@ -201,6 +201,10 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
     /* 若無活躍 UE 或 ZMQ socket 尚未就緒，靜默跳過 */
     if (num_ues == 0 || stats == NULL || g_zmq_sock == NULL) return;
 
+    /* ── [Rate Limiter] 每 10 次 MAC indication 送一次 CONTROL-REQ (10Hz) ── */
+    static uint32_t s_cb_count = 0;
+    if ((++s_cb_count % 10) != 0) return;
+
     /* ── [Step 1] 序列化 UE 狀態為 JSON ──────────────────────────────────
      *   格式範例:
      *   {

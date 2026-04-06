@@ -42,7 +42,7 @@ void init_sync_ui(sync_ui_t* s)
   rc = pthread_mutex_init(&s->mtx_sync, mtx_attr );
   assert(rc == 0);
 
-  s->wait_ms = 5000;
+  s->wait_ms = 30000;
 
   s->flag_sync = false;
   s->msg_ack = false;

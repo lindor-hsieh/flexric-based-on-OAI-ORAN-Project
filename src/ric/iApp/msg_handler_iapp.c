@@ -89,11 +89,15 @@ e2ap_msg_t e2ap_handle_subscription_response_iapp(e42_iapp_t* iapp, const e2ap_m
   assert(msg != NULL);
   assert(msg->type == RIC_SUBSCRIPTION_RESPONSE);
 
-  ric_subscription_response_t const* src = &msg->u_msgs.ric_sub_resp; 
+  ric_subscription_response_t const* src = &msg->u_msgs.ric_sub_resp;
 
   xapp_ric_id_xpct_t const xpctd = find_xapp_map_ric_id(&iapp->map_ric_id, src->ric_id.ric_req_id);
-  assert(xpctd.has_value == true && "RIC Req Id not found!"); 
-  xapp_ric_id_t const x = xpctd.xapp_ric_id; 
+  if(xpctd.has_value == false){
+    printf("[iApp]: SUBSCRIPTION RESPONSE rx RIC_REQ_ID %d but no xApp mapping found, dropping\n", src->ric_id.ric_req_id);
+    e2ap_msg_t none = {.type = NONE_E2_MSG_TYPE};
+    return none;
+  }
+  xapp_ric_id_t const x = xpctd.xapp_ric_id;
 
   assert(src->ric_id.ran_func_id == x.ric_id.ran_func_id);
   assert(src->ric_id.ric_inst_id == x.ric_id.ric_inst_id);
@@ -129,11 +133,8 @@ e2ap_msg_t e2ap_handle_subscription_delete_response_iapp(e42_iapp_t* iapp, const
     e2ap_msg_t none = {.type = NONE_E2_MSG_TYPE};
     return none;
   }
- 
-  assert(xpctd.has_value == true && "RIC Req Id not found!"); 
 
-
-  xapp_ric_id_t const x = xpctd.xapp_ric_id; 
+  xapp_ric_id_t const x = xpctd.xapp_ric_id;
 
   assert(src->ric_id.ran_func_id == x.ric_id.ran_func_id);
   assert(src->ric_id.ric_inst_id == x.ric_id.ric_inst_id);
@@ -164,11 +165,15 @@ e2ap_msg_t e2ap_handle_e42_ric_control_ack_iapp(e42_iapp_t* iapp, const e2ap_msg
   assert(msg != NULL);
   assert(msg->type == RIC_CONTROL_ACKNOWLEDGE);
 
-  ric_control_acknowledge_t const* src = &msg->u_msgs.ric_ctrl_ack; 
+  ric_control_acknowledge_t const* src = &msg->u_msgs.ric_ctrl_ack;
 
   xapp_ric_id_xpct_t const xpctd = find_xapp_map_ric_id(&iapp->map_ric_id, src->ric_id.ric_req_id);
-  assert(xpctd.has_value == true && "RIC Req Id not found!"); 
-  xapp_ric_id_t const x = xpctd.xapp_ric_id; 
+  if(xpctd.has_value == false){
+    printf("[iApp]: CONTROL ACK rx RIC_REQ_ID %d but no xApp mapping found, dropping\n", src->ric_id.ric_req_id);
+    e2ap_msg_t none = {.type = NONE_E2_MSG_TYPE};
+    return none;
+  }
+  xapp_ric_id_t const x = xpctd.xapp_ric_id;
 
   assert(src->ric_id.ran_func_id == x.ric_id.ran_func_id);
   assert(src->ric_id.ric_inst_id == x.ric_id.ric_inst_id);
@@ -340,7 +345,11 @@ e2ap_msg_t e2ap_handle_e42_ric_subscription_request_iapp(e42_iapp_t* iapp, const
   e42_ric_subscription_request_t const * e42_sr = &msg->u_msgs.e42_ric_sub_req;
  
   assert(valid_xapp_id(iapp, e42_sr->xapp_id) == true);
-  assert(valid_global_e2_node(iapp, &e42_sr->id ) );
+  if(!valid_global_e2_node(iapp, &e42_sr->id)){
+    printf("[iApp]: E42_RIC_SUBSCRIPTION_REQUEST rx from xApp %d but E2 node not yet registered, dropping\n", e42_sr->xapp_id);
+    e2ap_msg_t ans = {.type = NONE_E2_MSG_TYPE};
+    return ans;
+  }
 
   xapp_ric_id_t xapp_ric_id = {.ric_id = e42_sr->sr.ric_id,
                                 .xapp_id = e42_sr->xapp_id };
@@ -379,7 +388,11 @@ e2ap_msg_t e2ap_handle_e42_ric_control_request_iapp(e42_iapp_t* iapp, const e2ap
   e42_ric_control_request_t const* e42_cr = &msg->u_msgs.e42_ric_ctrl_req;
 
   assert(valid_xapp_id(iapp, e42_cr->xapp_id) == true);
-  assert(valid_global_e2_node(iapp, &e42_cr->id));
+  if(!valid_global_e2_node(iapp, &e42_cr->id)){
+    printf("[iApp]: E42_RIC_CONTROL_REQUEST rx from xApp %d but E2 node not yet registered, dropping\n", e42_cr->xapp_id);
+    e2ap_msg_t ans = {.type = NONE_E2_MSG_TYPE};
+    return ans;
+  }
 
   xapp_ric_id_t xapp_ric_id = {.ric_id = e42_cr->ctrl_req.ric_id,
                                 .xapp_id = e42_cr->xapp_id};

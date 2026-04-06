@@ -188,10 +188,19 @@ static
 void e2_event_loop_iapp(e42_iapp_t* iapp)
 {
   assert(iapp != NULL);
-  while(iapp->stop_token == false){ 
+  while(iapp->stop_token == false){
 
-    async_event_t e = next_async_event_iapp(iapp); 
-    assert(e.type != UNKNOWN_EVENT && "Unknown event triggered ");
+    async_event_t e = next_async_event_iapp(iapp);
+
+    // SCTP_ASSOC_CHANGE and other unhandled notifications return UNKNOWN_EVENT.
+    // Free any allocated notification memory and continue the loop instead of crashing.
+    if(e.type == UNKNOWN_EVENT){
+      if(e.msg.notif != NULL){
+        free(e.msg.notif);
+        e.msg.notif = NULL;
+      }
+      continue;
+    }
 
     switch(e.type){
       case SCTP_MSG_ARRIVED_EVENT:

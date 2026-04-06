@@ -73,10 +73,16 @@ void stop_pending_event(near_ric_t* ric, pending_event_ric_t* ev )
 
   int rc = pthread_mutex_lock(&ric->pend_mtx);
   assert(rc == 0);
-  void (*free_pending_event)(void*) = NULL; 
+  void (*free_pending_event)(void*) = NULL;
   int* fd = bi_map_extract_right(&ric->pending, ev, sizeof(*ev), free_pending_event);
   rc = pthread_mutex_unlock(&ric->pend_mtx);
   assert(rc == 0);
+
+  // Guard: timeout handler may have already disarmed the timer and removed the bimap entry.
+  if(fd == NULL){
+    printf("[NEAR-RIC]: WARNING: ACK/response arrived after pending event timeout - timer already disarmed, skipping.\n");
+    return;
+  }
 
 //  assert(bi_map_size(&ric->pending) == 0 && "Just one SM supported");
   assert(*fd > 0);
