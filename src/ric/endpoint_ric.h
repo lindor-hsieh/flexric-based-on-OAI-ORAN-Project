@@ -50,5 +50,7 @@ void e2ap_reg_sock_addr_ric(e2ap_ep_ric_t* ric, global_e2_node_id_t const* id, s
 
 global_e2_node_id_t* e2ap_rm_sock_addr_ric(e2ap_ep_ric_t* ric, sctp_info_t const* s);
 
+global_e2_node_id_t* e2ap_rm_sock_addr_ric_by_assoc(e2ap_ep_ric_t* ep, sctp_assoc_t assoc_id);
+
 #endif
 

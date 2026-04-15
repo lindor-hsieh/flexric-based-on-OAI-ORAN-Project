@@ -455,17 +455,38 @@ void e2_event_loop_ric(near_ric_t* ric)
           }
         case PENDING_EVENT:
           {
-            printf("[NEAR-RIC]: WARNING: Pending event timeout. Disarming timer.\n");
-            // Remove the bimap entry first so stop_pending_event (if ACK arrives late)
-            // will see a NULL fd and skip rm_fd_asio_ric safely.
+            // bi_map_extract_left() crashes in Release builds when the key is
+            // absent (the debug assert is compiled out, leaving a dummy-node
+            // dereference).  We must check whether this fd is still in the
+            // bimap BEFORE calling extract.  A stale epoll event can deliver a
+            // PENDING_EVENT after stop_pending_event() has already removed the
+            // entry — in that case just ignore the event.
+            pthread_mutex_lock(&ric->pend_mtx);
+
+            bool entry_exists = false;
             {
-              int tmp_fd = e.fd;
-              pthread_mutex_lock(&ric->pend_mtx);
-              bi_map_extract_left(&ric->pending, &tmp_fd, sizeof(tmp_fd), NULL);
-              pthread_mutex_unlock(&ric->pend_mtx);
+              void* it  = assoc_rb_tree_front(&ric->pending.left);
+              void* end = assoc_rb_tree_end(&ric->pending.left);
+              while (it != end) {
+                int* k = (int*)assoc_rb_tree_key(&ric->pending.left, it);
+                if (*k == e.fd) { entry_exists = true; break; }
+                it = assoc_rb_tree_next(&ric->pending.left, it);
+              }
             }
-            // Remove from epoll and close the timerfd so it stops firing.
-            rm_fd_asio_ric(&ric->io, e.fd);
+
+            void* found = NULL;
+            if (entry_exists) {
+              int tmp_fd = e.fd;
+              found = bi_map_extract_left(&ric->pending, &tmp_fd, sizeof(tmp_fd), NULL);
+            }
+            pthread_mutex_unlock(&ric->pend_mtx);
+
+            if (found != NULL) {
+              printf("[NEAR-RIC]: WARNING: Pending event timeout. Disarming timer.\n");
+              free(found);
+              rm_fd_asio_ric(&ric->io, e.fd);
+            }
+            // else: stale epoll event — fd already closed, nothing to do.
 
             break;
           }
@@ -807,11 +828,13 @@ uint16_t fwd_ric_subscription_request(near_ric_t* ric, global_e2_node_id_t const
   *(uint16_t*)&sr->ric_id.ric_req_id = ric_req_id;
 
 
-  // A pending event is created along with a timer of 3000 ms,
-  // after which an event will be generated
+  // A pending event is created along with a timer of 30000 ms,
+  // after which an event will be generated.
+  // 30 s gives remote DUs (PC2) enough time to respond even if they are
+  // still finishing their startup sequence.
   pending_event_ric_t ev = {.ev = SUBSCRIPTION_REQUEST_PENDING_EVENT, .id = sr->ric_id };
 
-  long const wait_ms = 3000;
+  long const wait_ms = 30000;
   int fd_timer = create_timer_ms_asio_ric(&ric->io, wait_ms, wait_ms); 
 
   {
@@ -819,11 +842,14 @@ uint16_t fwd_ric_subscription_request(near_ric_t* ric, global_e2_node_id_t const
     bi_map_insert(&ric->pending, &fd_timer, sizeof(fd_timer), &ev, sizeof(ev)); 
   }
 
-  byte_array_t ba_msg = e2ap_enc_subscription_request_ric(&ric->ap, sr); 
+  byte_array_t ba_msg = e2ap_enc_subscription_request_ric(&ric->ap, sr);
   defer({ free_byte_array(ba_msg); });
 
+  printf("[NEAR-RIC]: Forwarding SUBSCRIPTION_REQUEST RAN_FUNC_ID %d RIC_REQ_ID %d to nb_id=%u\n",
+         sr->ric_id.ran_func_id, ric_req_id, id->nb_id.nb_id);
+
   e2ap_send_bytes_ric(&ric->ep, id, ba_msg);
-   
+
   return ric_req_id;
 }
 

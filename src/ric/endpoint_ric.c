@@ -121,6 +121,10 @@ void e2ap_send_bytes_ric(const e2ap_ep_ric_t* ep, global_e2_node_id_t const* id 
   assert(ep != NULL);
 
   sctp_info_t s = find_map_e2_node_sad(( map_e2_node_sockaddr_t*)&ep->e2_nodes, id);
+  if (s.addr.sin_family == 0) {
+    // DU not found in the socket map; find_map_e2_node_sad already printed a warning.
+    return;
+  }
 
   sctp_msg_t msg = {.ba = ba,
                     .info = s};
@@ -151,5 +155,11 @@ global_e2_node_id_t* e2ap_rm_sock_addr_ric(e2ap_ep_ric_t* ep, sctp_info_t const*
   assert(s != NULL);
 
   return rm_map_sad_e2_node(&ep->e2_nodes, s);
+}
+
+global_e2_node_id_t* e2ap_rm_sock_addr_ric_by_assoc(e2ap_ep_ric_t* ep, sctp_assoc_t assoc_id)
+{
+  assert(ep != NULL);
+  return rm_map_sad_e2_node_by_assoc(&ep->e2_nodes, assoc_id);
 }
 

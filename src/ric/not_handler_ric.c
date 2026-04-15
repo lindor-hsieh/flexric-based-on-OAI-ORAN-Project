@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 #include "e2_node.h"
 
@@ -27,18 +28,32 @@ void notification_handle_ric(near_ric_t* ric, sctp_msg_t const* msg)
 
   assert(msg->notif->sn_header.sn_type == SCTP_SHUTDOWN_EVENT && "Only shutdown event supported");
 
-  global_e2_node_id_t* id = e2ap_rm_sock_addr_ric(&ric->ep, &msg->info);
-  defer( { free_global_e2_node_id(id);  free(id); } );
+  // Use SCTP association ID (not IP:port) to identify the disconnecting DU.
+  // For one-to-many SEQPACKET sockets, the shutdown notification's peer IP:port
+  // may be unreliable (port=0), but sse_assoc_id is always correct.
+  sctp_assoc_t assoc_id = msg->notif->sn_shutdown_event.sse_assoc_id;
+  global_e2_node_id_t* id = e2ap_rm_sock_addr_ric_by_assoc(&ric->ep, assoc_id);
+  defer( { if (id != NULL) { free_global_e2_node_id(id); free(id); } } );
+
+  if (id == NULL) {
+    printf("[NEAR-RIC]: WARNING: SCTP_SHUTDOWN_EVENT assoc_id=%u not found in ep->e2_nodes, ignoring\n",
+           (unsigned)assoc_id);
+    return;
+  }
 
   {
   lock_guard(&ric->conn_e2_nodes_mtx);
 
  //delete id from array and we are done
-  void* it = seq_front(&ric->conn_e2_nodes); 
+  void* it = seq_front(&ric->conn_e2_nodes);
   void* end = seq_end(&ric->conn_e2_nodes);
 
   it = find_if(&ric->conn_e2_nodes, it, end, id, eq_global_e2_node_id_e2_node);
-  assert(it != end && "E2 Node not found!");
+  if (it == end) {
+    printf("[NEAR-RIC]: WARNING: E2 Node nb_id=%u not found in conn_e2_nodes during SHUTDOWN, ignoring\n",
+           id->nb_id.nb_id);
+    return;
+  }
 
   // ASan does not like memmove.
   // seq_erase_free(&ric->conn_e2_nodes, it, it_next, free_e2_node_void);

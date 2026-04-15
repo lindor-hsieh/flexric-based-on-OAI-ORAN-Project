@@ -198,6 +198,9 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
     uint32_t                  num_ues  = mac_ind->msg.len_ue_stats;
     mac_ue_stats_impl_t const *stats   = mac_ind->msg.ue_stats;
 
+    /* [DEBUG] 每 100 次印一次，確認 callback 有被呼叫 */
+    { static uint32_t dbg_cnt = 0; if ((++dbg_cnt % 100) == 0) printf("[Node3 xApp][DEBUG] cb called %u times, num_ues=%u\n", dbg_cnt, num_ues); }
+
     /* 若無活躍 UE 或 ZMQ socket 尚未就緒，靜默跳過 */
     if (num_ues == 0 || stats == NULL || g_zmq_sock == NULL) return;
 

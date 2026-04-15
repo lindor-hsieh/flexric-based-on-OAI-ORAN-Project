@@ -70,7 +70,8 @@ void e2ap_send_sctp_msg(const e2ap_ep_t* ep, sctp_msg_t* msg)
       sri->sinfo_ppid, sri->sinfo_flags, sri->sinfo_stream, 0, 0);
   assert(rc != 0);
   if(rc == -1){
-    printf("Error sending sctp message \n");
+    printf("[E2AP]: Error sending sctp message to %s:%u — %s\n",
+           inet_ntoa(addr->sin_addr), ntohs(addr->sin_port), strerror(errno));
   }
 }
 

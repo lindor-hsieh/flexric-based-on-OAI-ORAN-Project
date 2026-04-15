@@ -454,14 +454,18 @@ sm_ans_xapp_t report_sm_sync_xapp(e42_xapp_t* xapp, global_e2_node_id_t* id, uin
   // Wait for the answer (it will arrive in the event loop)
   cond_wait_sync_ui(&xapp->sync, xapp->sync.wait_ms);
 
-  // Answer arrived
-  printf("[xApp]: Successfully subscribed to RAN_FUNC_ID %d \n", rf_id);
-
-  // The RIC_SUBSCRIPTION_PROCEDURE is still active
   sm_ans_xapp_t ans = {0};
-  ans.success = true;
-  ans.u.handle = ric_id.ric_req_id;
+  // msg_ack is set true only when a real SUBSCRIPTION_RESPONSE arrives.
+  // A 30-second timeout also unblocks cond_wait_sync_ui but leaves msg_ack=false.
+  ans.success = xapp->sync.msg_ack;
 
+  if (!ans.success) {
+    printf("[xApp]: WARNING: Subscription to RAN_FUNC_ID %d timed out — no SUBSCRIPTION_RESPONSE from DU\n", rf_id);
+    return ans;
+  }
+
+  printf("[xApp]: Successfully subscribed to RAN_FUNC_ID %d \n", rf_id);
+  ans.u.handle = ric_id.ric_req_id;
   return ans;
 }
 

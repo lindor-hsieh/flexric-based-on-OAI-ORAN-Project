@@ -341,8 +341,20 @@ sm_agent_t* sm_plugin_ag(plugin_ag_t* p, uint16_t key)
 
   void* start_it = assoc_front(&p->sm_ds);
   void* end_it = assoc_end(&p->sm_ds);
-  void* it = find_if(&p->sm_ds, start_it, end_it, &key, eq_ran_func_id); 
-  assert(it != end_it && "RAN function ID not found in the RAN"); 
+  void* it = find_if(&p->sm_ds, start_it, end_it, &key, eq_ran_func_id);
+  if (it == end_it) {
+    printf("[E2-AGENT]: FATAL: RAN_FUNC_ID %u not found in SM plugin list."
+           " libmac_sm.so on this host may be the wrong version."
+           " Copy the compiled library from PC1 and restart the DU.\n", (unsigned)key);
+    // Print all loaded SM IDs to help diagnose the mismatch.
+    void* dbg_it = assoc_front(&p->sm_ds);
+    while (dbg_it != end_it) {
+      sm_agent_t* s = assoc_value(&p->sm_ds, dbg_it);
+      if (s) printf("[E2-AGENT]:   Loaded SM ID: %u\n", (unsigned)s->info.id());
+      dbg_it = assoc_next(&p->sm_ds, dbg_it);
+    }
+    return NULL;
+  }
 
   sm_agent_t* sm = assoc_value(&p->sm_ds, it);
 

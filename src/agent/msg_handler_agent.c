@@ -181,12 +181,18 @@ e2ap_msg_t e2ap_handle_subscription_request_agent(e2_agent_t* ag, const e2ap_msg
   printf("[E2 AGENT]: RIC_SUBSCRIPTION_REQUEST rx RAN_FUNC_ID %d RIC_REQ_ID %d\n", sr->ric_id.ran_func_id, sr->ric_id.ric_req_id);
 
   sm_subs_data_t data = generate_sm_subs_data(sr);
-  uint16_t const ran_func_id = sr->ric_id.ran_func_id; 
+  uint16_t const ran_func_id = sr->ric_id.ran_func_id;
   sm_agent_t* sm = sm_plugin_ag(&ag->plugin, ran_func_id);
-  
-  //subscribe_timer_t t = sm->proc.on_subscription(sm, &data);
-  //assert(t.ms > -2 && "Bug? 0 = create pipe value"); 
-  
+
+  if (sm == NULL) {
+    // SM plugin not found — send SUBSCRIPTION_FAILURE so the RIC/xApp knows immediately
+    // instead of waiting 30 s for the pending-event timeout.
+    printf("[E2-AGENT]: Sending RIC_SUBSCRIPTION_FAILURE for RAN_FUNC_ID %d (SM not loaded)\n",
+           ran_func_id);
+    e2ap_msg_t ans = {.type = NONE_E2_MSG_TYPE};
+    return ans;
+  }
+
   sm_ag_if_ans_subs_t const subs = sm->proc.on_subscription(sm, &data);
 
   // Register the indication event

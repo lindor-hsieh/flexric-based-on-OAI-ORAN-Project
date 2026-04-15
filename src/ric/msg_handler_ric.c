@@ -41,6 +41,7 @@
 #include "iApp/e42_iapp_api.h"
 
 #include "util/alg_ds/ds/lock_guard/lock_guard.h"
+#include "util/alg_ds/ds/assoc_container/assoc_rb_tree.h"
 
 static inline
 bool check_valid_msg_type(e2_msg_type_t msg_type)
@@ -73,20 +74,38 @@ void stop_pending_event(near_ric_t* ric, pending_event_ric_t* ev )
 
   int rc = pthread_mutex_lock(&ric->pend_mtx);
   assert(rc == 0);
+
+  // Safe existence check: bi_map_extract_right crashes in Release mode when
+  // the key is not found (assert disabled → dummy-node dereference → SIGSEGV).
+  // Iterate the right tree to confirm the entry exists before extracting.
+  bool entry_exists = false;
+  {
+    assoc_rb_tree_t* rtree = &ric->pending.right;
+    void* it  = assoc_rb_tree_front(rtree);
+    void* end = assoc_rb_tree_end(rtree);
+    while (it != end) {
+      pending_event_ric_t* k = (pending_event_ric_t*)assoc_rb_tree_key(rtree, it);
+      if (eq_pending_event_ric(k, ev)) { entry_exists = true; break; }
+      it = assoc_rb_tree_next(rtree, it);
+    }
+  }
+
   void (*free_pending_event)(void*) = NULL;
-  int* fd = bi_map_extract_right(&ric->pending, ev, sizeof(*ev), free_pending_event);
+  int* fd = NULL;
+  if (entry_exists) {
+    fd = bi_map_extract_right(&ric->pending, ev, sizeof(*ev), free_pending_event);
+  }
+
   rc = pthread_mutex_unlock(&ric->pend_mtx);
   assert(rc == 0);
 
-  // Guard: timeout handler may have already disarmed the timer and removed the bimap entry.
-  if(fd == NULL){
+  if (fd == NULL) {
+    // Timeout handler already disarmed the timer and removed the bimap entry.
     printf("[NEAR-RIC]: WARNING: ACK/response arrived after pending event timeout - timer already disarmed, skipping.\n");
     return;
   }
 
-//  assert(bi_map_size(&ric->pending) == 0 && "Just one SM supported");
   assert(*fd > 0);
-  //printf("fd value in stopping pending event = %d \n", *fd);
   rm_fd_asio_ric(&ric->io, *fd);
   free(fd);
 }
@@ -106,7 +125,7 @@ e2ap_msg_t e2ap_msg_handle_ric(near_ric_t* ric, const e2ap_msg_t* msg)
 // O-RAN E2APv01.01: Messages for Global Procedures ///////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-// E2 -> RIC 
+// E2 -> RIC
  e2ap_msg_t e2ap_handle_subscription_response_ric(near_ric_t* ric, const e2ap_msg_t* msg)
 {
   assert(ric != NULL);
@@ -115,7 +134,10 @@ e2ap_msg_t e2ap_msg_handle_ric(near_ric_t* ric, const e2ap_msg_t* msg)
 
   ric_subscription_response_t const* resp = &msg->u_msgs.ric_sub_resp;
 
-  pending_event_ric_t ev = {.ev = SUBSCRIPTION_REQUEST_PENDING_EVENT, .id = resp->ric_id }; 
+  printf("[NEAR-RIC]: RIC_SUBSCRIPTION_RESPONSE rx RAN_FUNC_ID %d RIC_REQ_ID %d\n",
+         resp->ric_id.ran_func_id, resp->ric_id.ric_req_id);
+
+  pending_event_ric_t ev = {.ev = SUBSCRIPTION_REQUEST_PENDING_EVENT, .id = resp->ric_id };
   stop_pending_event(ric, &ev);
 
   assert(resp->len_na == 0 && "No other case implemented");
@@ -139,13 +161,25 @@ e2ap_msg_t e2ap_msg_handle_ric(near_ric_t* ric, const e2ap_msg_t* msg)
   return ans;
 }
 
-//E2 -> RIC 
+//E2 -> RIC
  e2ap_msg_t e2ap_handle_subscription_failure_ric(near_ric_t* ric, const e2ap_msg_t* msg)
 {
   assert(ric != NULL);
   assert(msg != NULL);
   assert(msg->type == RIC_SUBSCRIPTION_FAILURE);
-  assert(0!=0 && "Not implemented");
+
+  ric_subscription_failure_t const* fail = &msg->u_msgs.ric_sub_fail;
+  printf("[NEAR-RIC]: WARNING: RIC_SUBSCRIPTION_FAILURE rx RAN_FUNC_ID %d RIC_REQ_ID %d"
+         " -- DU rejected subscription (check libmac_sm.so on DU host)\n",
+         fail->ric_id.ran_func_id, fail->ric_id.ric_req_id);
+
+  // Notify the iApp so the xApp side gets a proper failure (not just a 30 s timeout).
+  pending_event_ric_t ev = {.ev = SUBSCRIPTION_REQUEST_PENDING_EVENT, .id = fail->ric_id };
+  stop_pending_event(ric, &ev);
+
+#ifndef TEST_AGENT_RIC
+  notify_msg_iapp_api(msg);
+#endif
 
   e2ap_msg_t ans = {.type = NONE_E2_MSG_TYPE};
   return ans;

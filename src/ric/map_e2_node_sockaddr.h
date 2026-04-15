@@ -53,6 +53,8 @@ void add_map_e2_node_sad(map_e2_node_sockaddr_t* m, global_e2_node_id_t const* i
 
 global_e2_node_id_t* rm_map_sad_e2_node(map_e2_node_sockaddr_t* m, sctp_info_t const* s);
 
+global_e2_node_id_t* rm_map_sad_e2_node_by_assoc(map_e2_node_sockaddr_t* m, sctp_assoc_t assoc_id);
+
 sctp_info_t find_map_e2_node_sad(map_e2_node_sockaddr_t* m, global_e2_node_id_t const* id);
 
 sctp_info_t find_map_e2_node_sad(map_e2_node_sockaddr_t * m, global_e2_node_id_t const* id);
