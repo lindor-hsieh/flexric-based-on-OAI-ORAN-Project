@@ -465,19 +465,39 @@ int main(int argc, char *argv[])
      *   - "10_ms" 字串由 mac_sm_ric.c 的 on_subscription_mac_sm_ric() 解析
      *   - sm_cb_mac 將在每次 Indication 到達時由 FlexRIC 呼叫
      * ─────────────────────────────────────────────────────────────────── */
-    sm_ans_xapp_t sub_ans = report_sm_xapp_api(
-        g_target_node_id,
-        SM_MAC_ID,
-        "10_ms",      /* 回報週期字串，對應 mac_event_trigger_t.ms = 10 */
-        sm_cb_mac     /* Indication Callback */
-    );
-
-    if (!sub_ans.success) {
-        fprintf(stderr, CLR_RED "[Node4 xApp] 訂閱 MAC SM 失敗，程式退出\n" CLR_RESET);
-        free_e2_node_arr_xapp(&nodes);
-        if (g_zmq_sock != NULL) zmq_close(g_zmq_sock);
-        zmq_ctx_destroy(g_zmq_ctx);
-        return EXIT_FAILURE;
+    sm_ans_xapp_t sub_ans = {0};
+    while (!sub_ans.success) {
+        sub_ans = report_sm_xapp_api(
+            g_target_node_id,
+            SM_MAC_ID,
+            "10_ms",      /* 回報週期字串，對應 mac_event_trigger_t.ms = 10 */
+            sm_cb_mac     /* Indication Callback */
+        );
+        if (!sub_ans.success) {
+            printf(CLR_YEL "[Node4 xApp] 訂閱失敗 (DU 可能尚未就緒)，重新查詢節點並重試...\n" CLR_RESET);
+            free_e2_node_arr_xapp(&nodes);
+            sleep(5);
+            /* 重新尋找目標節點，避免使用舊的 g_target_node_id 指標 */
+            target_idx = -1;
+            while (target_idx == -1) {
+                nodes = e2_nodes_xapp_api();
+                for (int i = 0; i < nodes.len; i++) {
+                    if (nodes.n[i].id.nb_id.nb_id == TARGET_NODE_ID) {
+                        target_idx = i;
+                        break;
+                    }
+                }
+                if (target_idx == -1) {
+                    printf(CLR_YEL "[Node4 xApp] 等待 Node 4 (ID=%u) 重新連線... 目前節點數: %d\n" CLR_RESET,
+                           TARGET_NODE_ID, nodes.len);
+                    free_e2_node_arr_xapp(&nodes);
+                    sleep(2);
+                }
+            }
+            g_target_node_id = &nodes.n[target_idx].id;
+            printf(CLR_GREEN "[Node4 xApp] 重新鎖定 Node 4 (nb_id=%u)，重試訂閱\n" CLR_RESET,
+                   g_target_node_id->nb_id.nb_id);
+        }
     }
     printf(CLR_GREEN "[Node4 xApp] MAC SM 訂閱成功 (handle=%d)，"
            "閉環控制迴圈啟動中...\n" CLR_RESET, sub_ans.u.handle);
