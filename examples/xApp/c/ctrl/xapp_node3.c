@@ -244,7 +244,7 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
         /* rnti：UE 識別碼 */
         cJSON_AddNumberToObject(ue_obj, "rnti",   (double)stats[i].rnti);
         /* bsr：Buffer Status Report，反映下行待送資料量 */
-        cJSON_AddNumberToObject(ue_obj, "bsr",    (double)stats[i].bsr);
+        cJSON_AddNumberToObject(ue_obj, "bsr",    (double)stats[i].dl_buffer_info);
         /* wb_cqi：Wideband Channel Quality Indicator，反映通道品質 */
         cJSON_AddNumberToObject(ue_obj, "wb_cqi", (double)stats[i].wb_cqi);
 
