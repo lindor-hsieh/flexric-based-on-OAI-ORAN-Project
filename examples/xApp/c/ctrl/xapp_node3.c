@@ -96,6 +96,32 @@ static void *g_zmq_ctx  = NULL;
 static void *g_zmq_sock = NULL;
 
 /* =============================================================================
+ * Delta DL TBS 追蹤表
+ * =========================================================================== */
+#define TBS_DB_SIZE 32
+static uint16_t s_prev_rnti[TBS_DB_SIZE] = {0};
+static uint64_t s_prev_tbs[TBS_DB_SIZE]  = {0};
+
+static uint64_t compute_delta_tbs(uint16_t rnti, uint64_t curr_tbs)
+{
+    for (int k = 0; k < TBS_DB_SIZE; k++) {
+        if (s_prev_rnti[k] == rnti) {
+            uint64_t delta = (curr_tbs >= s_prev_tbs[k]) ? (curr_tbs - s_prev_tbs[k]) : 0;
+            s_prev_tbs[k] = curr_tbs;
+            return delta;
+        }
+    }
+    for (int k = 0; k < TBS_DB_SIZE; k++) {
+        if (s_prev_rnti[k] == 0) {
+            s_prev_rnti[k] = rnti;
+            s_prev_tbs[k]  = curr_tbs;
+            return 0;
+        }
+    }
+    return 0;
+}
+
+/* =============================================================================
  * zmq_socket_init()
  *   建立或重建 ZMQ REQ socket 並連線至 Python 推論伺服器。
  *   當 recv() 逾時導致 REQ 狀態機卡住時，也呼叫此函式重置。
@@ -243,10 +269,11 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
 
         /* rnti：UE 識別碼 */
         cJSON_AddNumberToObject(ue_obj, "rnti",   (double)stats[i].rnti);
-        /* bsr：Buffer Status Report，反映下行待送資料量 */
-        cJSON_AddNumberToObject(ue_obj, "bsr",    (double)stats[i].dl_buffer_info);
-        /* wb_cqi：Wideband Channel Quality Indicator，反映通道品質 */
-        cJSON_AddNumberToObject(ue_obj, "wb_cqi", (double)stats[i].wb_cqi);
+        /* bsr：每個 callback 週期的 DL TBS 增量 (bytes)，反映實際下行吞吐量 */
+        uint64_t delta_tbs = compute_delta_tbs(stats[i].rnti, stats[i].dl_aggr_tbs);
+        cJSON_AddNumberToObject(ue_obj, "bsr",    (double)delta_tbs);
+        /* wb_cqi：DL MCS index (0-28)，反映通道品質（OAI RF sim wb_cqi 恆為 0） */
+        cJSON_AddNumberToObject(ue_obj, "wb_cqi", (double)stats[i].dl_mcs1);
 
         cJSON_AddItemToArray(ue_array, ue_obj);
     }
