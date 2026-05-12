@@ -95,6 +95,10 @@ static void *g_zmq_ctx  = NULL;
 /* ZeroMQ REQ socket (僅在 FlexRIC callback 執行緒中使用，無需加鎖) */
 static void *g_zmq_sock = NULL;
 
+/* Watchdog: 記錄最後一次收到 MAC indication 的時間戳 */
+static volatile time_t g_last_mac_time = 0;
+#define WATCHDOG_TIMEOUT_S  15
+
 /* =============================================================================
  * Delta DL TBS 追蹤表
  * =========================================================================== */
@@ -202,6 +206,29 @@ static void apply_fallback(uint32_t num_ues, mac_ue_stats_impl_t const *stats)
 }
 
 /* =============================================================================
+ * watchdog_thread()
+ *   背景執行緒：每 5 秒檢查 g_last_mac_time。超過門檻則 exit(1) 重啟。
+ * =========================================================================== */
+static void *watchdog_thread(void *arg)
+{
+    (void)arg;
+    sleep(30);
+    while (1) {
+        sleep(5);
+        time_t now  = time(NULL);
+        time_t last = g_last_mac_time;
+        if (last > 0 && (now - last) > WATCHDOG_TIMEOUT_S) {
+            fprintf(stderr,
+                CLR_RED "[Node3 xApp] Watchdog: %ld 秒未收到 MAC indication，"
+                        "SCTP 斷線，主動退出重啟\n" CLR_RESET,
+                (long)(now - last));
+            exit(1);
+        }
+    }
+    return NULL;
+}
+
+/* =============================================================================
  * sm_cb_mac()
  *   MAC Indication Callback — 每 10ms 由 FlexRIC 框架觸發一次。
  *   執行完整的感測 → 推論 → 控制閉環。
@@ -219,6 +246,9 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
     /* ── [Guard 2] 確認是 MAC SM 的 Indication ───────────────────────────── */
     if (rd->ind.type != MAC_STATS_V0) return;
 
+    /* ── [Watchdog] 更新最後一次 MAC indication 時間戳 ──────────────────── */
+    g_last_mac_time = time(NULL);
+
     /* ── [Step 0] 擷取 MAC 狀態資料 ─────────────────────────────────────── */
     mac_ind_data_t const     *mac_ind  = &rd->ind.mac;
     uint32_t                  num_ues  = mac_ind->msg.len_ue_stats;
@@ -230,9 +260,6 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
     /* 若無活躍 UE 或 ZMQ socket 尚未就緒，靜默跳過 */
     if (num_ues == 0 || stats == NULL || g_zmq_sock == NULL) return;
 
-    /* ── [Rate Limiter] 每 10 次 MAC indication 送一次 CONTROL-REQ (10Hz) ── */
-    static uint32_t s_cb_count = 0;
-    if ((++s_cb_count % 10) != 0) return;
 
     /* ── [Step 1] 序列化 UE 狀態為 JSON ──────────────────────────────────
      *   格式範例:
@@ -500,7 +527,7 @@ int main(int argc, char *argv[])
         sub_ans = report_sm_xapp_api(
             g_target_node_id,
             SM_MAC_ID,
-            "10_ms",      /* 回報週期字串，對應 mac_event_trigger_t.ms = 10 */
+            "100_ms",     /* 回報週期字串，對應 mac_event_trigger_t.ms = 100 */
             sm_cb_mac     /* Indication Callback */
         );
         if (!sub_ans.success) {
@@ -532,7 +559,20 @@ int main(int argc, char *argv[])
            "閉環控制迴圈啟動中...\n" CLR_RESET, sub_ans.u.handle);
 
     /* ─────────────────────────────────────────────────────────────────────
-     * [5] 主迴圈：阻塞等待直到收到 SIGINT/SIGTERM 或環境變數 XAPP_DURATION 到期
+     * [5] 啟動 Watchdog 執行緒
+     * ─────────────────────────────────────────────────────────────────── */
+    g_last_mac_time = time(NULL);
+    pthread_t wd_tid;
+    if (pthread_create(&wd_tid, NULL, watchdog_thread, NULL) == 0) {
+        pthread_detach(wd_tid);
+        printf(CLR_GREEN "[Node3 xApp] Watchdog 執行緒已啟動 (超時門檻=%ds)\n"
+               CLR_RESET, WATCHDOG_TIMEOUT_S);
+    } else {
+        fprintf(stderr, CLR_YEL "[Node3 xApp] Watchdog 執行緒啟動失敗，繼續運行\n" CLR_RESET);
+    }
+
+    /* ─────────────────────────────────────────────────────────────────────
+     * [6] 主迴圈：阻塞等待直到收到 SIGINT/SIGTERM 或環境變數 XAPP_DURATION 到期
      *   實際的閉環控制邏輯均在 sm_cb_mac() 中執行。
      * ─────────────────────────────────────────────────────────────────── */
     xapp_wait_end_api();

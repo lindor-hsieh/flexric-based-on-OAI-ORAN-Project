@@ -25,6 +25,7 @@
 #include <assert.h>      // for assert
 #include <errno.h>       // for errno
 #include <pthread.h>     // for pthread_mutex_lock/unlock
+#include <stdbool.h>     // for bool
 //#include <linux/sctp.h>  // for sctp_event_subscribe, SCTP_AUTOCLOSE, SCTP_E...
 #include <netinet/sctp.h>
 #include <netinet/in.h>  // for sockaddr_in, IPPROTO_SCTP, htons, sockaddr_in6
@@ -116,7 +117,8 @@ sctp_msg_t e2ap_recv_msg_iapp(e2ap_ep_iapp_t* ep)
 // When assoc_id != 0, the kernel routes by association (ignores msg_name),
 // so all xApps sharing the same source IP are correctly distinguished.
 // When assoc_id == 0, falls back to msg_name address routing (xApp-to-RIC direction).
-static void send_iapp_by_assoc(int fd, pthread_mutex_t* mtx,
+// Returns true on success, false on failure (errno is preserved for caller).
+static bool send_iapp_by_assoc(int fd, pthread_mutex_t* mtx,
                                 byte_array_t ba,
                                 struct sctp_sndrcvinfo const* sri)
 {
@@ -145,11 +147,19 @@ static void send_iapp_by_assoc(int fd, pthread_mutex_t* mtx,
 
   pthread_mutex_lock(mtx);
   ssize_t const rc = sendmsg(fd, &mhdr, 0);
+  int saved_errno = errno;
   pthread_mutex_unlock(mtx);
   if (rc == -1) {
-    printf("[iApp]: sendmsg failed (assoc_id=%d errno=%d)\n",
-           sri->sinfo_assoc_id, errno);
+    if (saved_errno != EPIPE) {
+      // Only log truly unexpected errors; EPIPE (broken pipe) means the xApp
+      // disconnected and is handled by the caller — suppress the flood.
+      printf("[iApp]: sendmsg failed (assoc_id=%d errno=%d)\n",
+             sri->sinfo_assoc_id, saved_errno);
+    }
+    errno = saved_errno;
+    return false;
   }
+  return true;
 }
 
 void e2ap_send_bytes_iapp(const e2ap_ep_iapp_t* ep, int xapp_id, byte_array_t ba)
@@ -162,8 +172,15 @@ void e2ap_send_bytes_iapp(const e2ap_ep_iapp_t* ep, int xapp_id, byte_array_t ba
 
   // Use assoc_id routing so MAC indications reach the correct xApp even when
   // multiple xApps share the same source IP (macvlan-br).
-  send_iapp_by_assoc(ep->base.fd, &((e2ap_ep_iapp_t*)ep)->base.mtx,
-                     ba, &msg.info.sri);
+  bool ok = send_iapp_by_assoc(ep->base.fd, &((e2ap_ep_iapp_t*)ep)->base.mtx,
+                                ba, &msg.info.sri);
+  if (!ok && errno == EPIPE) {
+    // xApp disconnected (broken pipe) — remove from connection map so that
+    // future MAC indications are not sent to this dead association.
+    // The xApp will reconnect with a new assoc_id on restart.
+    printf("[iApp]: xApp %d disconnected (EPIPE), removing from routing table\n", xapp_id);
+    rm_map_xapps_sad((map_xapps_sockaddr_t*)&((e2ap_ep_iapp_t*)ep)->xapps, xapp_id);
+  }
 }
 
 

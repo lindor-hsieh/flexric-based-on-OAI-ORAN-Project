@@ -95,6 +95,12 @@ static void *g_zmq_ctx  = NULL;
 /* ZeroMQ REQ socket (僅在 FlexRIC callback 執行緒中使用，無需加鎖) */
 static void *g_zmq_sock = NULL;
 
+/* Watchdog: 記錄最後一次收到 MAC indication 的時間戳 (seconds since epoch) */
+static volatile time_t g_last_mac_time = 0;
+
+/* Watchdog 超時門檻 (秒)：超過此時間無 MAC indication 視為 SCTP 斷線 */
+#define WATCHDOG_TIMEOUT_S  15
+
 /* =============================================================================
  * Delta DL TBS 追蹤表
  *   記錄每個 RNTI 上一次的累計 dl_aggr_tbs，計算每個 callback 週期內的增量。
@@ -182,6 +188,32 @@ static bool zmq_socket_init(void)
 }
 
 /* =============================================================================
+ * watchdog_thread()
+ *   背景執行緒：每 5 秒檢查一次 g_last_mac_time。
+ *   若超過 WATCHDOG_TIMEOUT_S 秒未收到 MAC indication，代表 SCTP 連線已斷，
+ *   主動呼叫 exit(1) 讓 Docker restart:on-failure 自動重啟 xApp 重新連線。
+ * =========================================================================== */
+static void *watchdog_thread(void *arg)
+{
+    (void)arg;
+    /* 啟動初始寬限期：等待訂閱生效後才開始計時 */
+    sleep(30);
+    while (1) {
+        sleep(5);
+        time_t now  = time(NULL);
+        time_t last = g_last_mac_time;
+        if (last > 0 && (now - last) > WATCHDOG_TIMEOUT_S) {
+            fprintf(stderr,
+                CLR_RED "[Node1 xApp] Watchdog: %ld 秒未收到 MAC indication，"
+                        "SCTP 連線可能已斷，主動退出讓 Docker 重啟\n" CLR_RESET,
+                (long)(now - last));
+            exit(1);
+        }
+    }
+    return NULL;
+}
+
+/* =============================================================================
  * apply_fallback()
  *   Fallback 排程策略：對所有活躍 UE 進行等比例 PRB 分配。
  *   當 ZMQ 通訊失敗時呼叫，確保 OAI MAC 層能繼續正常運作。
@@ -222,6 +254,9 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
     /* ── [Guard 2] 確認是 MAC SM 的 Indication ───────────────────────────── */
     if (rd->ind.type != MAC_STATS_V0) return;
 
+    /* ── [Watchdog] 更新最後一次 MAC indication 時間戳 ──────────────────── */
+    g_last_mac_time = time(NULL);
+
     /* ── [Step 0] 擷取 MAC 狀態資料 ─────────────────────────────────────── */
     mac_ind_data_t const     *mac_ind  = &rd->ind.mac;
     uint32_t                  num_ues  = mac_ind->msg.len_ue_stats;
@@ -229,10 +264,6 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
 
     /* 若無活躍 UE 或 ZMQ socket 尚未就緒，靜默跳過 */
     if (num_ues == 0 || stats == NULL || g_zmq_sock == NULL) return;
-
-    /* ── [Rate Limiter] 每 10 次 MAC indication 送一次 CONTROL-REQ (10Hz) ── */
-    static uint32_t s_cb_count = 0;
-    if ((++s_cb_count % 10) != 0) return;
 
     /* ── [Step 1] 序列化 UE 狀態為 JSON ──────────────────────────────────
      *   格式範例:
@@ -492,7 +523,7 @@ int main(int argc, char *argv[])
     sm_ans_xapp_t sub_ans = report_sm_xapp_api(
         g_target_node_id,
         SM_MAC_ID,
-        "10_ms",
+        "100_ms",
         sm_cb_mac
     );
 
@@ -507,7 +538,20 @@ int main(int argc, char *argv[])
            "閉環控制迴圈啟動中...\n" CLR_RESET, sub_ans.u.handle);
 
     /* ─────────────────────────────────────────────────────────────────────
-     * [5] 主迴圈：阻塞等待直到收到 SIGINT/SIGTERM
+     * [5] 啟動 Watchdog 執行緒，偵測 SCTP 斷線後自動退出
+     * ─────────────────────────────────────────────────────────────────── */
+    g_last_mac_time = time(NULL);  /* 初始化時間戳，避免啟動期誤觸 */
+    pthread_t wd_tid;
+    if (pthread_create(&wd_tid, NULL, watchdog_thread, NULL) == 0) {
+        pthread_detach(wd_tid);
+        printf(CLR_GREEN "[Node1 xApp] Watchdog 執行緒已啟動 (超時門檻=%ds)\n"
+               CLR_RESET, WATCHDOG_TIMEOUT_S);
+    } else {
+        fprintf(stderr, CLR_YEL "[Node1 xApp] Watchdog 執行緒啟動失敗，繼續運行\n" CLR_RESET);
+    }
+
+    /* ─────────────────────────────────────────────────────────────────────
+     * [6] 主迴圈：阻塞等待直到收到 SIGINT/SIGTERM
      * ─────────────────────────────────────────────────────────────────── */
     xapp_wait_end_api();
 
