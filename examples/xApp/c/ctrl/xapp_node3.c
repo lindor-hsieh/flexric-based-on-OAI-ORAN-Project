@@ -71,6 +71,10 @@ const uint32_t TARGET_NODE_ID = 3587;
 /* Slot 遮罩常數 */
 #define SLOT_MASK_FULL    0xFFFF   /* 時域全開，不限制 slot */
 
+/* Rate Limiter: 每 10 個 10ms callback 向 Python 查詢一次新分配 (= 100ms)
+ * delta_tbs 累積 100ms 窗口，大幅降低單一 UE 在短窗口內 delta=0 的機率 */
+#define ZMQ_RATE_LIMIT    10
+
 /* 終端機顏色控制碼，方便 Debug 輸出辨識 */
 #define CLR_RED    "\x1b[31m"
 #define CLR_GREEN  "\x1b[32m"
@@ -105,6 +109,11 @@ static volatile time_t g_last_mac_time = 0;
 #define TBS_DB_SIZE 32
 static uint16_t s_prev_rnti[TBS_DB_SIZE] = {0};
 static uint64_t s_prev_tbs[TBS_DB_SIZE]  = {0};
+
+/* Rate Limiter 快取：儲存上一輪 Python 回傳的 PRB 分配
+ * 供非 ZMQ 的 9 個 callback 複用，確保 MAC 控制連續性 */
+static mac_slice_params_t s_cached_slices[MAX_UE_COUNT];
+static int                s_cached_alloc_n = 0;
 
 static uint64_t compute_delta_tbs(uint16_t rnti, uint64_t curr_tbs)
 {
@@ -260,6 +269,21 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
     /* 若無活躍 UE 或 ZMQ socket 尚未就緒，靜默跳過 */
     if (num_ues == 0 || stats == NULL || g_zmq_sock == NULL) return;
 
+    /* ── [Rate Limiter] ──────────────────────────────────────────────────
+     * 非 ZMQ 的 callback：下發快取分配後直接返回，delta_tbs 繼續累積。
+     * ZMQ callback (每 ZMQ_RATE_LIMIT 次)：向 Python 查詢並更新快取。
+     * ─────────────────────────────────────────────────────────────────── */
+    static uint32_t s_cb_tick = 0;
+    if (++s_cb_tick % ZMQ_RATE_LIMIT != 0) {
+        if (s_cached_alloc_n > 0) {
+            mac_ctrl_req_data_t cached_req = {0};
+            cached_req.msg.type       = 0;
+            cached_req.msg.len_slices = (uint32_t)s_cached_alloc_n;
+            cached_req.msg.slices     = s_cached_slices;
+            control_sm_xapp_api(g_target_node_id, SM_MAC_ID, &cached_req);
+        }
+        return;
+    }
 
     /* ── [Step 1] 序列化 UE 狀態為 JSON ──────────────────────────────────
      *   格式範例:
@@ -387,56 +411,44 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
      *     .slot_mask = 時域 Slot 遮罩，0xFFFF 表示允許使用所有 Slot
      *     .priority  = 搶佔優先級，0 為預設
      * ─────────────────────────────────────────────────────────────────── */
-    mac_ctrl_req_data_t req = {0};
-    req.hdr.dummy      = 0;
-    req.msg.type       = 0;   /* 0 = Resource Allocation Control */
-    req.msg.len_slices = (uint32_t)alloc_n;
-    req.msg.slices     = calloc(alloc_n, sizeof(mac_slice_params_t));
+    /* 解析回傳分配，寫入靜態快取（無需 malloc/free）*/
+    int new_n    = (alloc_n < MAX_UE_COUNT) ? alloc_n : MAX_UE_COUNT;
+    int parsed_n = 0;
+    for (int i = 0; i < new_n; i++) {
+        cJSON *item   = cJSON_GetArrayItem(allocs_arr, i);
+        cJSON *j_rnti = cJSON_GetObjectItemCaseSensitive(item, "rnti");
+        cJSON *j_prb  = cJSON_GetObjectItemCaseSensitive(item, "prb_abs");
 
-    if (req.msg.slices == NULL) {
-        fprintf(stderr, CLR_RED "[Node3 xApp] calloc 失敗，Fallback\n" CLR_RESET);
-        cJSON_Delete(resp);
-        apply_fallback(num_ues, stats);
-        return;
-    }
-
-    for (int i = 0; i < alloc_n; i++) {
-        cJSON *item    = cJSON_GetArrayItem(allocs_arr, i);
-        cJSON *j_rnti  = cJSON_GetObjectItemCaseSensitive(item, "rnti");
-        cJSON *j_prb   = cJSON_GetObjectItemCaseSensitive(item, "prb_abs");
-
-        /* 若 JSON 欄位格式不符，退回等比例分配作為保底 */
         if (!cJSON_IsNumber(j_rnti) || !cJSON_IsNumber(j_prb)) {
-            req.msg.slices[i].id        = (num_ues > 0) ? stats[i % num_ues].rnti : 0;
-            req.msg.slices[i].prb_quota = 1.0f / (float)alloc_n;
-            req.msg.slices[i].slot_mask = SLOT_MASK_FULL;
-            req.msg.slices[i].priority  = 0;
-            continue;
+            s_cached_slices[i].id        = (num_ues > 0) ? stats[i % num_ues].rnti : 0;
+            s_cached_slices[i].prb_quota = 1.0f / (float)new_n;
+            s_cached_slices[i].slot_mask = SLOT_MASK_FULL;
+            s_cached_slices[i].priority  = 0;
+        } else {
+            double prb_abs   = j_prb->valuedouble;
+            double prb_ratio = prb_abs / (double)TOTAL_PRB_COUNT;
+            if (prb_ratio < 0.0) prb_ratio = 0.0;
+            if (prb_ratio > 1.0) prb_ratio = 1.0;
+            s_cached_slices[i].id        = (uint32_t)j_rnti->valueint;
+            s_cached_slices[i].prb_quota = (float)prb_ratio;
+            s_cached_slices[i].slot_mask = SLOT_MASK_FULL;
+            s_cached_slices[i].priority  = 0;
+            printf("[Node3 xApp] AI 決策 UE[0x%04x]: prb_abs=%.0f → ratio=%.3f\n",
+                   s_cached_slices[i].id, prb_abs, prb_ratio);
         }
-
-        /* 絕對 PRB 數 → 比例，並夾緊到合法範圍 [0.0, 1.0] */
-        double prb_abs   = j_prb->valuedouble;
-        double prb_ratio = prb_abs / (double)TOTAL_PRB_COUNT;
-        if (prb_ratio < 0.0) prb_ratio = 0.0;
-        if (prb_ratio > 1.0) prb_ratio = 1.0;
-
-        req.msg.slices[i].id        = (uint32_t)j_rnti->valueint;
-        req.msg.slices[i].prb_quota = (float)prb_ratio;
-        req.msg.slices[i].slot_mask = SLOT_MASK_FULL;
-        req.msg.slices[i].priority  = 0;
-
-        printf("[Node3 xApp] AI 決策 UE[0x%04x]: prb_abs=%.0f → ratio=%.3f\n",
-               req.msg.slices[i].id, prb_abs, prb_ratio);
+        parsed_n++;
     }
-
-    /* 回傳 JSON 已解析完畢，立即釋放 */
+    s_cached_alloc_n = parsed_n;
     cJSON_Delete(resp);
 
-    /* 下發 PRB 控制訊息至 OAI MAC 層 */
-    control_sm_xapp_api(g_target_node_id, SM_MAC_ID, &req);
-
-    /* 釋放動態分配的切片陣列，防止每 10ms 觸發一次的 Memory Leak */
-    free(req.msg.slices);
+    /* 立即下發新分配 */
+    if (s_cached_alloc_n > 0) {
+        mac_ctrl_req_data_t req = {0};
+        req.msg.type       = 0;
+        req.msg.len_slices = (uint32_t)s_cached_alloc_n;
+        req.msg.slices     = s_cached_slices;
+        control_sm_xapp_api(g_target_node_id, SM_MAC_ID, &req);
+    }
 }
 
 /* =============================================================================
