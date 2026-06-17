@@ -27,6 +27,7 @@
 #include "xApp/e42_xapp_api.h"
 #include "sm/mac_sm/ie/mac_data_ie.h"
 #include "sm/mac_sm/mac_sm_id.h"
+#include "lib/e2ap/v2_03/e2ap_types/common/e2ap_global_node_id.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,6 +55,7 @@
 #define WATCHDOG_TIMEOUT_S 30
 
 /* ─── Node role tables ───────────────────────────────────────────────────── */
+#define DONOR_NB_ID    3584   /* Donor DU: skip, not an IAB relay */
 static const uint32_t RELAY_NB_IDS[] = {3585, 3586};
 #define NUM_RELAY  2
 
@@ -169,6 +171,9 @@ static void send_ctrl(node_ctx_t *ctx)
     req.msg.len_slices = (uint32_t)n;
     req.msg.slices     = slices;
     control_sm_xapp_api(&ctx->id, SM_MAC_ID, &req);
+    printf("[PRB] ctrl → nb_id=%u  role=%s  n_ues=%d  per_ue_quota=%.3f\n",
+           ctx->id.nb_id.nb_id, ctx->is_relay ? "relay" : "access", n, per_ue);
+    fflush(stdout);
 }
 
 /* ─── Common MAC indication handler ─────────────────────────────────────── */
@@ -265,6 +270,9 @@ static void init_ratios(policy_t pol)
 /* ─── main ───────────────────────────────────────────────────────────────── */
 int main(int argc, char *argv[])
 {
+    /* Make stdout unbuffered so log is written even if killed with -9 */
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     g_policy = parse_policy();
     init_ratios(g_policy);
 
@@ -294,12 +302,18 @@ int main(int argc, char *argv[])
     }
     printf("[PRB] %d E2 node(s) connected\n", nodes.len);
 
-    /* Build node context list */
+    /* Build node context list (skip Donor DU 3584 — not an IAB relay) */
     g_nctx = 0;
     for (int i = 0; i < nodes.len && g_nctx < MAX_NODES - 3; i++) {
         uint32_t nb = nodes.n[i].id.nb_id.nb_id;
+        if (nb == DONOR_NB_ID) {
+            printf("[PRB] Skipping Donor DU nb_id=%u\n", nb);
+            continue;
+        }
         node_ctx_t *c = &g_ctx[g_nctx];
-        c->id       = nodes.n[i].id;   /* copy struct by value */
+        /* Deep copy — global_e2_node_id_t contains uint64_t* cu_du_id pointer;
+         * shallow assignment then free_e2_node_arr_xapp() leaves dangling ptr. */
+        c->id       = cp_global_e2_node_id(&nodes.n[i].id);
         c->is_relay = is_relay_nb(nb);
         c->num_ues  = 0;
         c->bsr_sum  = 0.0;
