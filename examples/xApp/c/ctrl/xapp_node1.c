@@ -107,8 +107,14 @@ static volatile time_t g_last_mac_time = 0;
 /* =============================================================================
  * Delta DL TBS 追蹤表
  *   記錄每個 RNTI 上一次的累計 dl_aggr_tbs，計算每個 callback 週期內的增量。
- *   OAI RF sim 的 dl_buffer_info / wb_cqi 永遠為 0，改用 dl_aggr_tbs delta
- *   與 dl_mcs1 作為 DRL 狀態輸入。
+ *   dl_aggr_tbs delta 與 dl_mcs1 是原本唯二使用的 DRL 狀態輸入，但兩者在 UE
+ *   RLC buffer 為空時都會凍結不動（OAI 排程器會直接跳過無資料的 UE，見
+ *   gNB_scheduler_dlsch.c），無法區分「無資料可傳」與「有資料但通道差/PRB
+ *   不足」。dl_buffer_info（真實 RLC 佇列位元組數）已確認完整打通 E2SM-MAC
+ *   的 encode/decode pipeline（mac_data_ie.h/mac_enc_plain.c/mac_dec_plain.c），
+ *   只是先前 JSON 序列化沒有把它送出去；wb_cqi（真 3GPP CQI，非 dl_mcs1）
+ *   則因 RF Simulator 不計算真實通道傳播，PUCCH 回報 payload 目前仍是 0，
+ *   這是模擬器本身的限制，不是程式碼問題。
  * =========================================================================== */
 #define TBS_DB_SIZE 32
 static uint16_t s_prev_rnti[TBS_DB_SIZE] = {0};
@@ -325,6 +331,9 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
         cJSON_AddNumberToObject(ue_obj, "bsr",    (double)delta_tbs);
         /* wb_cqi：DL MCS index (0-28)，反映通道品質（OAI RF sim wb_cqi 恆為 0） */
         cJSON_AddNumberToObject(ue_obj, "wb_cqi", (double)stats[i].dl_mcs1);
+        /* dl_buffer_info：真實 RLC 佇列位元組數，不受「是否被排程」影響的需求訊號；
+           用來讓 Python 端區分「無資料可傳」與「有資料但通道差/PRB 不足」 */
+        cJSON_AddNumberToObject(ue_obj, "dl_buffer_info", (double)stats[i].dl_buffer_info);
 
         cJSON_AddItemToArray(ue_array, ue_obj);
     }

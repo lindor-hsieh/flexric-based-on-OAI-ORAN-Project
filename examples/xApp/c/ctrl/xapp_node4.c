@@ -322,6 +322,9 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
         cJSON_AddNumberToObject(ue_obj, "bsr",    (double)delta_tbs);
         /* wb_cqi：DL MCS index (0-28)，反映通道品質（OAI RF sim wb_cqi 恆為 0） */
         cJSON_AddNumberToObject(ue_obj, "wb_cqi", (double)stats[i].dl_mcs1);
+        /* dl_buffer_info：真實 RLC 佇列位元組數，不受「是否被排程」影響的需求訊號；
+           用來讓 Python 端區分「無資料可傳」與「有資料但通道差/PRB 不足」 */
+        cJSON_AddNumberToObject(ue_obj, "dl_buffer_info", (double)stats[i].dl_buffer_info);
 
         cJSON_AddItemToArray(ue_array, ue_obj);
     }
