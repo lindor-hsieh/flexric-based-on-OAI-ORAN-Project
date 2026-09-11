@@ -313,9 +313,28 @@ void publish_ind_msg(near_ric_t* ric,  uint16_t ran_func_id, sm_ag_if_rd_ind_t* 
   assert(ric != NULL);
   assert(msg != NULL);
   assert(msg->type == RIC_CONTROL_FAILURE);
-  assert(0!=0 && "not implemented" );
 
-  e2ap_msg_t ans = {0};
+  ric_control_failure_t const* fail = &msg->u_msgs.ric_ctrl_fail;
+
+  // 2026-09-11 修正：舊版此處只有 assert(0 && "not implemented")，Release
+  // build 因 -DNDEBUG 該 assert 被剝離，導致函式直接 no-op 返回——完全不會
+  // stop_pending_event()，這個 CONTROL_REQUEST 的 pending entry 只能等
+  // 3000ms timerfd 自然逾時才清掉，在高負載/高頻 CONTROL-REQUEST 下會讓
+  // pending bimap／timerfd 數量不必要地暫時膨脹，加劇 FlexRIC 崩潰風險
+  // （詳見 FlexRIC pending event queue 調查報告）。改為立即清掉該筆
+  // pending event，行為對齊 e2ap_handle_control_ack_ric()。
+  printf("[NEAR-RIC]: WARNING: RIC_CONTROL_FAILURE rx RAN_FUNC_ID %d RIC_REQ_ID %d"
+         " -- DU rejected control request\n",
+         fail->ric_id.ran_func_id, fail->ric_id.ric_req_id);
+
+  pending_event_ric_t ev = {.ev = CONTROL_REQUEST_PENDING_EVENT, .id = fail->ric_id };
+  stop_pending_event(ric, &ev);
+
+#ifndef TEST_AGENT_RIC
+  notify_msg_iapp_api(msg);
+#endif
+
+  e2ap_msg_t ans = {.type = NONE_E2_MSG_TYPE};
   return ans;
 }
   
@@ -329,7 +348,31 @@ void publish_ind_msg(near_ric_t* ric,  uint16_t ran_func_id, sm_ag_if_rd_ind_t* 
   assert(ric != NULL);
   assert(msg != NULL);
   assert(msg->type == E2AP_ERROR_INDICATION);
-  assert(0 != 0 && "Not Implemented");
+
+  // 2026-09-11 修正：同 e2ap_handle_control_failure_ric() 的理由——舊版
+  // assert(0 && "Not Implemented") 在 Release build 被剝離成 no-op，任何一筆
+  // pending event（subscription/subscription-delete/control 三種都有可能，
+  // ric_id 為 optional 欄位無法預先判斷是哪一種）都只能等 3000ms timeout
+  // 自然清掉。這裡改成收到 ERROR INDICATION 時，對三種事件型別都嘗試呼叫
+  // stop_pending_event()——該函式本身已有安全的存在性檢查，對不存在的
+  // entry 是無害的 no-op，因此不需要事先知道是哪一種。
+  e2ap_error_indication_t const* err = &msg->u_msgs.err_ind;
+  if (err->ric_id != NULL) {
+    printf("[NEAR-RIC]: WARNING: E2AP_ERROR_INDICATION rx RAN_FUNC_ID %d RIC_REQ_ID %d\n",
+           err->ric_id->ran_func_id, err->ric_id->ric_req_id);
+    pending_event_ric_t ev_sub = {.ev = SUBSCRIPTION_REQUEST_PENDING_EVENT, .id = *err->ric_id };
+    stop_pending_event(ric, &ev_sub);
+    pending_event_ric_t ev_sub_del = {.ev = SUBSCRIPTION_DELETE_REQUEST_PENDING_EVENT, .id = *err->ric_id };
+    stop_pending_event(ric, &ev_sub_del);
+    pending_event_ric_t ev_ctrl = {.ev = CONTROL_REQUEST_PENDING_EVENT, .id = *err->ric_id };
+    stop_pending_event(ric, &ev_ctrl);
+  } else {
+    printf("[NEAR-RIC]: WARNING: E2AP_ERROR_INDICATION rx (no RIC ID)\n");
+  }
+
+#ifndef TEST_AGENT_RIC
+  notify_msg_iapp_api(msg);
+#endif
 
   e2ap_msg_t ans = {.type = NONE_E2_MSG_TYPE};
   return ans;
