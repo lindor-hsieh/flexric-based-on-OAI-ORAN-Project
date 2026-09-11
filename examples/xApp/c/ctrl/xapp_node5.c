@@ -3,14 +3,14 @@
  *  xapp_node5.c — Node 5 Local xApp (Near-RT 閉環控制)
  *
  *  架構角色：
- *    - 部署於 PC 2 的 Docker 容器，專職控制 IAB Node 5
+ *    - 部署於 PC1（xApp/inference 集中於 PC1，見 CLAUDE.md），專職控制 IAB Node 5
  *    - 透過 E2SM-MAC 每 10ms 收集 UE 狀態
  *    - 透過 ZeroMQ REQ/REP 呼叫 Python AI 推論伺服器取得 PRB 分配決策
  *    - 將決策透過 control_sm_xapp_api() 寫回 OAI MAC 層
  *
  *  ZMQ 協定：
  *    發送 (C → Python):
- *      {"node_id": 3589, "ues": [{"rnti": X, "bsr": Y, "wb_cqi": Z}, ...]}
+ *      {"node_id": 4046, "ues": [{"rnti": X, "bsr": Y, "wb_cqi": Z}, ...]}
  *    接收 (Python → C):
  *      {"allocations": [{"rnti": X, "prb_abs": N}, ...]}
  *      prb_abs 為絕對 PRB 數量，C 端將除以 TOTAL_PRB_COUNT 轉換為比例
@@ -53,7 +53,7 @@
  * 全域常數
  * =========================================================================== */
 
-/* 鎖定目標節點 ID (Node 5 的 nb_id = 0xe05 = 3589) */
+/* 鎖定目標節點 ID (Node 5 的 nb_id，由 FlexRIC Server 分配) */
 const uint32_t TARGET_NODE_ID = 3589;
 
 /* ZMQ IPC 路徑：Python 推論伺服器監聽此位址 */
@@ -263,6 +263,9 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
     uint32_t                  num_ues  = mac_ind->msg.len_ue_stats;
     mac_ue_stats_impl_t const *stats   = mac_ind->msg.ue_stats;
 
+    /* [DEBUG] 每 100 次印一次，確認 callback 有被呼叫 */
+    { static uint32_t dbg_cnt = 0; if ((++dbg_cnt % 100) == 0) printf("[Node5 xApp][DEBUG] cb called %u times, num_ues=%u\n", dbg_cnt, num_ues); }
+
     /* 若無活躍 UE 或 ZMQ socket 尚未就緒，靜默跳過 */
     if (num_ues == 0 || stats == NULL || g_zmq_sock == NULL) return;
 
@@ -285,7 +288,7 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
     /* ── [Step 1] 序列化 UE 狀態為 JSON ──────────────────────────────────
      *   格式範例:
      *   {
-     *     "node_id": 3589,
+     *     "node_id": 4046,
      *     "ues": [
      *       {"rnti": 12345, "bsr": 1024, "wb_cqi": 12},
      *       ...
@@ -346,6 +349,7 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
     free(payload);   /* cJSON_PrintUnformatted 回傳的字串需手動 free */
 
     if (send_rc < 0) {
+        /* send 失敗通常代表 Python 端未啟動或 socket 緩衝區滿 */
         fprintf(stderr, CLR_YEL "[Node5 xApp] ZMQ send 失敗 (%s)，Fallback\n" CLR_RESET,
                 zmq_strerror(zmq_errno()));
         apply_fallback(num_ues, stats);
@@ -363,6 +367,10 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
     if (recv_rc < 0) {
         fprintf(stderr, CLR_YEL "[Node5 xApp] ZMQ recv 逾時 (%s)，重建 socket 並 Fallback\n" CLR_RESET,
                 zmq_strerror(zmq_errno()));
+        /*
+         * recv 逾時後 REQ socket 處於「等待 reply」狀態，
+         * 即使設定了 ZMQ_REQ_RELAXED 仍建議重建 socket 確保乾淨狀態。
+         */
         zmq_socket_init();
         apply_fallback(num_ues, stats);
         return;
@@ -463,6 +471,8 @@ int main(int argc, char *argv[])
 
     /* ─────────────────────────────────────────────────────────────────────
      * [1] 初始化 FlexRIC xApp API
+     *   - init_fr_args()  解析設定檔 (flexric.conf)，取得 RIC IP/Port 等參數
+     *   - init_xapp_api() 建立與 FlexRIC Server 的 SCTP/E2AP 連線
      * ─────────────────────────────────────────────────────────────────── */
     fr_args_t args = init_fr_args(argc, argv);
     init_xapp_api(&args);
@@ -470,6 +480,8 @@ int main(int argc, char *argv[])
 
     /* ─────────────────────────────────────────────────────────────────────
      * [2] 初始化 ZeroMQ
+     *   - 建立 ZMQ context (程式全域唯一)
+     *   - 建立並連線 REQ socket 至 Python 推論伺服器
      * ─────────────────────────────────────────────────────────────────── */
     g_zmq_ctx = zmq_ctx_new();
     if (g_zmq_ctx == NULL) {
@@ -486,6 +498,8 @@ int main(int argc, char *argv[])
 
     /* ─────────────────────────────────────────────────────────────────────
      * [3] 尋找目標節點 (阻塞等待，直到 Node 5 連線上 FlexRIC Server)
+     *   nodes 陣列在整個程式生命週期中保持有效，
+     *   因為 g_target_node_id 指向其元素。
      * ─────────────────────────────────────────────────────────────────── */
     e2_node_arr_xapp_t nodes;
     int target_idx = -1;
@@ -494,6 +508,10 @@ int main(int argc, char *argv[])
         nodes = e2_nodes_xapp_api();
 
         for (int i = 0; i < nodes.len; i++) {
+            /*
+             * 結構存取路徑: nodes.n[i].id.nb_id.nb_id
+             *   global_e2_node_id_t.nb_id → e2ap_gnb_id_t.nb_id → uint32_t
+             */
             if (nodes.n[i].id.nb_id.nb_id == TARGET_NODE_ID) {
                 target_idx = i;
                 break;
@@ -504,7 +522,7 @@ int main(int argc, char *argv[])
             printf(CLR_YEL "[Node5 xApp] 等待 Node 5 (ID=%u) 連線... "
                    "目前已連接節點數: %d，2 秒後重試\n" CLR_RESET,
                    TARGET_NODE_ID, nodes.len);
-            free_e2_node_arr_xapp(&nodes);
+            free_e2_node_arr_xapp(&nodes);   /* 釋放本次快照，準備重新查詢 */
             sleep(2);
         }
     }
@@ -516,14 +534,16 @@ int main(int argc, char *argv[])
 
     /* ─────────────────────────────────────────────────────────────────────
      * [4] 訂閱 MAC SM Indication，回報週期 10ms
+     *   - "10_ms" 字串由 mac_sm_ric.c 的 on_subscription_mac_sm_ric() 解析
+     *   - sm_cb_mac 將在每次 Indication 到達時由 FlexRIC 呼叫
      * ─────────────────────────────────────────────────────────────────── */
     sm_ans_xapp_t sub_ans = {0};
     while (!sub_ans.success) {
         sub_ans = report_sm_xapp_api(
             g_target_node_id,
             SM_MAC_ID,
-            "100_ms",
-            sm_cb_mac
+            "100_ms",     /* 回報週期字串，對應 mac_event_trigger_t.ms = 100 */
+            sm_cb_mac     /* Indication Callback */
         );
         if (!sub_ans.success) {
             printf(CLR_YEL "[Node5 xApp] 訂閱失敗 (DU 可能尚未就緒)，重新查詢節點並重試...\n" CLR_RESET);
@@ -567,7 +587,8 @@ int main(int argc, char *argv[])
     }
 
     /* ─────────────────────────────────────────────────────────────────────
-     * [6] 主迴圈：阻塞等待直到收到 SIGINT/SIGTERM
+     * [6] 主迴圈：阻塞等待直到收到 SIGINT/SIGTERM 或環境變數 XAPP_DURATION 到期
+     *   實際的閉環控制邏輯均在 sm_cb_mac() 中執行。
      * ─────────────────────────────────────────────────────────────────── */
     xapp_wait_end_api();
 
@@ -576,8 +597,10 @@ int main(int argc, char *argv[])
      * ─────────────────────────────────────────────────────────────────── */
     printf("[Node5 xApp] 收到停止訊號，開始清理資源...\n");
 
+    /* 取消 MAC SM 訂閱 */
     rm_report_sm_xapp_api(sub_ans.u.handle);
 
+    /* 關閉 ZMQ socket 與 context */
     if (g_zmq_sock != NULL) {
         zmq_close(g_zmq_sock);
         g_zmq_sock = NULL;
@@ -587,6 +610,7 @@ int main(int argc, char *argv[])
         g_zmq_ctx = NULL;
     }
 
+    /* 釋放節點陣列 (g_target_node_id 同時失效，但程式即將結束) */
     free_e2_node_arr_xapp(&nodes);
 
     printf(CLR_GREEN "[Node5 xApp] 程式正常退出\n" CLR_RESET);

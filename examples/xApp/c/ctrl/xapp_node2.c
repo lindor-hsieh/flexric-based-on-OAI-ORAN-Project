@@ -3,7 +3,7 @@
  *  xapp_node2.c — Node 2 Local xApp (Near-RT 閉環控制)
  *
  *  架構角色：
- *    - 部署於 PC 1 的 Docker 容器，專職控制 IAB Node 2
+ *    - 部署於 PC1（xApp/inference 集中於 PC1，見 CLAUDE.md），專職控制 IAB Node 2
  *    - 透過 E2SM-MAC 每 10ms 收集 UE 狀態
  *    - 透過 ZeroMQ REQ/REP 呼叫 Python AI 推論伺服器取得 PRB 分配決策
  *    - 將決策透過 control_sm_xapp_api() 寫回 OAI MAC 層
@@ -53,7 +53,7 @@
  * 全域常數
  * =========================================================================== */
 
-/* 鎖定目標節點 ID (Node 2 的 nb_id = 0xe02 = 3586) */
+/* 鎖定目標節點 ID (Node 2 的 nb_id = 0xe01 = 3585) */
 const uint32_t TARGET_NODE_ID = 3586;
 
 /* ZMQ IPC 路徑：Python 推論伺服器監聽此位址 */
@@ -98,12 +98,23 @@ static void *g_zmq_ctx  = NULL;
 /* ZeroMQ REQ socket (僅在 FlexRIC callback 執行緒中使用，無需加鎖) */
 static void *g_zmq_sock = NULL;
 
-/* Watchdog: 記錄最後一次收到 MAC indication 的時間戳 */
+/* Watchdog: 記錄最後一次收到 MAC indication 的時間戳 (seconds since epoch) */
 static volatile time_t g_last_mac_time = 0;
+
+/* Watchdog 超時門檻 (秒)：超過此時間無 MAC indication 視為 SCTP 斷線 */
 #define WATCHDOG_TIMEOUT_S  15
 
 /* =============================================================================
  * Delta DL TBS 追蹤表
+ *   記錄每個 RNTI 上一次的累計 dl_aggr_tbs，計算每個 callback 週期內的增量。
+ *   dl_aggr_tbs delta 與 dl_mcs1 是原本唯二使用的 DRL 狀態輸入，但兩者在 UE
+ *   RLC buffer 為空時都會凍結不動（OAI 排程器會直接跳過無資料的 UE，見
+ *   gNB_scheduler_dlsch.c），無法區分「無資料可傳」與「有資料但通道差/PRB
+ *   不足」。dl_buffer_info（真實 RLC 佇列位元組數）已確認完整打通 E2SM-MAC
+ *   的 encode/decode pipeline（mac_data_ie.h/mac_enc_plain.c/mac_dec_plain.c），
+ *   只是先前 JSON 序列化沒有把它送出去；wb_cqi（真 3GPP CQI，非 dl_mcs1）
+ *   則因 RF Simulator 不計算真實通道傳播，PUCCH 回報 payload 目前仍是 0，
+ *   這是模擬器本身的限制，不是程式碼問題。
  * =========================================================================== */
 #define TBS_DB_SIZE 32
 static uint16_t s_prev_rnti[TBS_DB_SIZE] = {0};
@@ -190,6 +201,32 @@ static bool zmq_socket_init(void)
 }
 
 /* =============================================================================
+ * watchdog_thread()
+ *   背景執行緒：每 5 秒檢查一次 g_last_mac_time。
+ *   若超過 WATCHDOG_TIMEOUT_S 秒未收到 MAC indication，代表 SCTP 連線已斷，
+ *   主動呼叫 exit(1) 讓 Docker restart:on-failure 自動重啟 xApp 重新連線。
+ * =========================================================================== */
+static void *watchdog_thread(void *arg)
+{
+    (void)arg;
+    /* 啟動初始寬限期：等待訂閱生效後才開始計時 */
+    sleep(30);
+    while (1) {
+        sleep(5);
+        time_t now  = time(NULL);
+        time_t last = g_last_mac_time;
+        if (last > 0 && (now - last) > WATCHDOG_TIMEOUT_S) {
+            fprintf(stderr,
+                CLR_RED "[Node2 xApp] Watchdog: %ld 秒未收到 MAC indication，"
+                        "SCTP 連線可能已斷，主動退出讓 Docker 重啟\n" CLR_RESET,
+                (long)(now - last));
+            exit(1);
+        }
+    }
+    return NULL;
+}
+
+/* =============================================================================
  * apply_fallback()
  *   Fallback 排程策略：對所有活躍 UE 進行等比例 PRB 分配。
  *   當 ZMQ 通訊失敗時呼叫，確保 OAI MAC 層能繼續正常運作。
@@ -210,29 +247,6 @@ static void apply_fallback(uint32_t num_ues, mac_ue_stats_impl_t const *stats)
      */
     (void)num_ues;
     (void)stats;
-}
-
-/* =============================================================================
- * watchdog_thread()
- *   背景執行緒：每 5 秒檢查 g_last_mac_time。超過門檻則 exit(1) 重啟。
- * =========================================================================== */
-static void *watchdog_thread(void *arg)
-{
-    (void)arg;
-    sleep(30);
-    while (1) {
-        sleep(5);
-        time_t now  = time(NULL);
-        time_t last = g_last_mac_time;
-        if (last > 0 && (now - last) > WATCHDOG_TIMEOUT_S) {
-            fprintf(stderr,
-                CLR_RED "[Node2 xApp] Watchdog: %ld 秒未收到 MAC indication，"
-                        "SCTP 斷線，主動退出重啟\n" CLR_RESET,
-                (long)(now - last));
-            exit(1);
-        }
-    }
-    return NULL;
 }
 
 /* =============================================================================
@@ -280,7 +294,7 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
     /* ── [Step 1] 序列化 UE 狀態為 JSON ──────────────────────────────────
      *   格式範例:
      *   {
-     *     "node_id": 3586,
+     *     "node_id": 3585,
      *     "ues": [
      *       {"rnti": 12345, "bsr": 1024, "wb_cqi": 12},
      *       ...
@@ -359,6 +373,10 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
     if (recv_rc < 0) {
         fprintf(stderr, CLR_YEL "[Node2 xApp] ZMQ recv 逾時 (%s)，重建 socket 並 Fallback\n" CLR_RESET,
                 zmq_strerror(zmq_errno()));
+        /*
+         * recv 逾時後 REQ socket 處於「等待 reply」狀態，
+         * 即使設定了 ZMQ_REQ_RELAXED 仍建議重建 socket 確保乾淨狀態。
+         */
         zmq_socket_init();
         apply_fallback(num_ues, stats);
         return;
@@ -455,6 +473,8 @@ int main(int argc, char *argv[])
 
     /* ─────────────────────────────────────────────────────────────────────
      * [1] 初始化 FlexRIC xApp API
+     *   - init_fr_args()  解析設定檔 (flexric.conf)，取得 RIC IP/Port 等參數
+     *   - init_xapp_api() 建立與 FlexRIC Server 的 SCTP/E2AP 連線
      * ─────────────────────────────────────────────────────────────────── */
     fr_args_t args = init_fr_args(argc, argv);
     init_xapp_api(&args);
@@ -462,6 +482,8 @@ int main(int argc, char *argv[])
 
     /* ─────────────────────────────────────────────────────────────────────
      * [2] 初始化 ZeroMQ
+     *   - 建立 ZMQ context (程式全域唯一)
+     *   - 建立並連線 REQ socket 至 Python 推論伺服器
      * ─────────────────────────────────────────────────────────────────── */
     g_zmq_ctx = zmq_ctx_new();
     if (g_zmq_ctx == NULL) {
@@ -478,6 +500,8 @@ int main(int argc, char *argv[])
 
     /* ─────────────────────────────────────────────────────────────────────
      * [3] 尋找目標節點 (阻塞等待，直到 Node 2 連線上 FlexRIC Server)
+     *   nodes 陣列在整個程式生命週期中保持有效，
+     *   因為 g_target_node_id 指向其元素。
      * ─────────────────────────────────────────────────────────────────── */
     e2_node_arr_xapp_t nodes;
     int target_idx = -1;
@@ -527,9 +551,9 @@ int main(int argc, char *argv[])
            "閉環控制迴圈啟動中...\n" CLR_RESET, sub_ans.u.handle);
 
     /* ─────────────────────────────────────────────────────────────────────
-     * [5] 啟動 Watchdog 執行緒
+     * [5] 啟動 Watchdog 執行緒，偵測 SCTP 斷線後自動退出
      * ─────────────────────────────────────────────────────────────────── */
-    g_last_mac_time = time(NULL);
+    g_last_mac_time = time(NULL);  /* 初始化時間戳，避免啟動期誤觸 */
     pthread_t wd_tid;
     if (pthread_create(&wd_tid, NULL, watchdog_thread, NULL) == 0) {
         pthread_detach(wd_tid);

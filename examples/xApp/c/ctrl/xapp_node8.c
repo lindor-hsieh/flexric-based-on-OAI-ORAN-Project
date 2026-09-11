@@ -1,16 +1,16 @@
 /*
  * =============================================================================
- *  xapp_node3.c — Node 3 Local xApp (Near-RT 閉環控制)
+ *  xapp_node8.c — Node 8 Local xApp (Near-RT 閉環控制)
  *
  *  架構角色：
- *    - 部署於 PC1（xApp/inference 集中於 PC1，見 CLAUDE.md），專職控制 IAB Node 3
+ *    - 部署於 PC1（xApp/inference 集中於 PC1，見 CLAUDE.md），專職控制 IAB Node 8
  *    - 透過 E2SM-MAC 每 10ms 收集 UE 狀態
  *    - 透過 ZeroMQ REQ/REP 呼叫 Python AI 推論伺服器取得 PRB 分配決策
  *    - 將決策透過 control_sm_xapp_api() 寫回 OAI MAC 層
  *
  *  ZMQ 協定：
  *    發送 (C → Python):
- *      {"node_id": 3587, "ues": [{"rnti": X, "bsr": Y, "wb_cqi": Z}, ...]}
+ *      {"node_id": 4046, "ues": [{"rnti": X, "bsr": Y, "wb_cqi": Z}, ...]}
  *    接收 (Python → C):
  *      {"allocations": [{"rnti": X, "prb_abs": N}, ...]}
  *      prb_abs 為絕對 PRB 數量，C 端將除以 TOTAL_PRB_COUNT 轉換為比例
@@ -53,11 +53,11 @@
  * 全域常數
  * =========================================================================== */
 
-/* 鎖定目標節點 ID (Node 3 的 nb_id = 0xe01 = 3585) */
-const uint32_t TARGET_NODE_ID = 3587;
+/* 鎖定目標節點 ID (Node 8 的 nb_id，由 FlexRIC Server 分配) */
+const uint32_t TARGET_NODE_ID = 3592;
 
 /* ZMQ IPC 路徑：Python 推論伺服器監聽此位址 */
-#define ZMQ_ENDPOINT      "ipc:///tmp/zmq_node3_inference.ipc"
+#define ZMQ_ENDPOINT      "ipc:///tmp/zmq_node8_inference.ipc"
 
 /* ZMQ 收發逾時 (毫秒)，防止 Python 端卡死拖垮 OAI MAC 迴圈 */
 #define ZMQ_TIMEOUT_MS    5
@@ -71,7 +71,8 @@ const uint32_t TARGET_NODE_ID = 3587;
 /* Slot 遮罩常數 */
 #define SLOT_MASK_FULL    0xFFFF   /* 時域全開，不限制 slot */
 
-/* Rate Limiter: 每 10 個 10ms callback 向 Python 查詢一次新分配 (= 100ms) */
+/* Rate Limiter: 每 10 個 10ms callback 向 Python 查詢一次新分配 (= 100ms)
+ * delta_tbs 累積 100ms 窗口，大幅降低單一 UE 在短窗口內 delta=0 的機率 */
 #define ZMQ_RATE_LIMIT    10
 
 /* 終端機顏色控制碼，方便 Debug 輸出辨識 */
@@ -98,29 +99,19 @@ static void *g_zmq_ctx  = NULL;
 /* ZeroMQ REQ socket (僅在 FlexRIC callback 執行緒中使用，無需加鎖) */
 static void *g_zmq_sock = NULL;
 
-/* Watchdog: 記錄最後一次收到 MAC indication 的時間戳 (seconds since epoch) */
+/* Watchdog: 記錄最後一次收到 MAC indication 的時間戳 */
 static volatile time_t g_last_mac_time = 0;
-
-/* Watchdog 超時門檻 (秒)：超過此時間無 MAC indication 視為 SCTP 斷線 */
 #define WATCHDOG_TIMEOUT_S  15
 
 /* =============================================================================
  * Delta DL TBS 追蹤表
- *   記錄每個 RNTI 上一次的累計 dl_aggr_tbs，計算每個 callback 週期內的增量。
- *   dl_aggr_tbs delta 與 dl_mcs1 是原本唯二使用的 DRL 狀態輸入，但兩者在 UE
- *   RLC buffer 為空時都會凍結不動（OAI 排程器會直接跳過無資料的 UE，見
- *   gNB_scheduler_dlsch.c），無法區分「無資料可傳」與「有資料但通道差/PRB
- *   不足」。dl_buffer_info（真實 RLC 佇列位元組數）已確認完整打通 E2SM-MAC
- *   的 encode/decode pipeline（mac_data_ie.h/mac_enc_plain.c/mac_dec_plain.c），
- *   只是先前 JSON 序列化沒有把它送出去；wb_cqi（真 3GPP CQI，非 dl_mcs1）
- *   則因 RF Simulator 不計算真實通道傳播，PUCCH 回報 payload 目前仍是 0，
- *   這是模擬器本身的限制，不是程式碼問題。
  * =========================================================================== */
 #define TBS_DB_SIZE 32
 static uint16_t s_prev_rnti[TBS_DB_SIZE] = {0};
 static uint64_t s_prev_tbs[TBS_DB_SIZE]  = {0};
 
-/* Rate Limiter 快取：儲存上一輪 Python 回傳的 PRB 分配 */
+/* Rate Limiter 快取：儲存上一輪 Python 回傳的 PRB 分配
+ * 供非 ZMQ 的 9 個 callback 複用，確保 MAC 控制連續性 */
 static mac_slice_params_t s_cached_slices[MAX_UE_COUNT];
 static int                s_cached_alloc_n = 0;
 
@@ -161,7 +152,7 @@ static bool zmq_socket_init(void)
     /* 建立新的 REQ socket */
     g_zmq_sock = zmq_socket(g_zmq_ctx, ZMQ_REQ);
     if (g_zmq_sock == NULL) {
-        fprintf(stderr, CLR_RED "[Node3 xApp] zmq_socket() 失敗: %s\n" CLR_RESET,
+        fprintf(stderr, CLR_RED "[Node8 xApp] zmq_socket() 失敗: %s\n" CLR_RESET,
                 zmq_strerror(zmq_errno()));
         return false;
     }
@@ -190,7 +181,7 @@ static bool zmq_socket_init(void)
 
     /* 連線至 Python 推論伺服器 (IPC，不需要對方先啟動) */
     if (zmq_connect(g_zmq_sock, ZMQ_ENDPOINT) != 0) {
-        fprintf(stderr, CLR_RED "[Node3 xApp] zmq_connect(%s) 失敗: %s\n" CLR_RESET,
+        fprintf(stderr, CLR_RED "[Node8 xApp] zmq_connect(%s) 失敗: %s\n" CLR_RESET,
                 ZMQ_ENDPOINT, zmq_strerror(zmq_errno()));
         zmq_close(g_zmq_sock);
         g_zmq_sock = NULL;
@@ -198,32 +189,6 @@ static bool zmq_socket_init(void)
     }
 
     return true;
-}
-
-/* =============================================================================
- * watchdog_thread()
- *   背景執行緒：每 5 秒檢查一次 g_last_mac_time。
- *   若超過 WATCHDOG_TIMEOUT_S 秒未收到 MAC indication，代表 SCTP 連線已斷，
- *   主動呼叫 exit(1) 讓 Docker restart:on-failure 自動重啟 xApp 重新連線。
- * =========================================================================== */
-static void *watchdog_thread(void *arg)
-{
-    (void)arg;
-    /* 啟動初始寬限期：等待訂閱生效後才開始計時 */
-    sleep(30);
-    while (1) {
-        sleep(5);
-        time_t now  = time(NULL);
-        time_t last = g_last_mac_time;
-        if (last > 0 && (now - last) > WATCHDOG_TIMEOUT_S) {
-            fprintf(stderr,
-                CLR_RED "[Node3 xApp] Watchdog: %ld 秒未收到 MAC indication，"
-                        "SCTP 連線可能已斷，主動退出讓 Docker 重啟\n" CLR_RESET,
-                (long)(now - last));
-            exit(1);
-        }
-    }
-    return NULL;
 }
 
 /* =============================================================================
@@ -247,6 +212,29 @@ static void apply_fallback(uint32_t num_ues, mac_ue_stats_impl_t const *stats)
      */
     (void)num_ues;
     (void)stats;
+}
+
+/* =============================================================================
+ * watchdog_thread()
+ *   背景執行緒：每 5 秒檢查 g_last_mac_time。超過門檻則 exit(1) 重啟。
+ * =========================================================================== */
+static void *watchdog_thread(void *arg)
+{
+    (void)arg;
+    sleep(30);
+    while (1) {
+        sleep(5);
+        time_t now  = time(NULL);
+        time_t last = g_last_mac_time;
+        if (last > 0 && (now - last) > WATCHDOG_TIMEOUT_S) {
+            fprintf(stderr,
+                CLR_RED "[Node8 xApp] Watchdog: %ld 秒未收到 MAC indication，"
+                        "SCTP 斷線，主動退出重啟\n" CLR_RESET,
+                (long)(now - last));
+            exit(1);
+        }
+    }
+    return NULL;
 }
 
 /* =============================================================================
@@ -275,10 +263,16 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
     uint32_t                  num_ues  = mac_ind->msg.len_ue_stats;
     mac_ue_stats_impl_t const *stats   = mac_ind->msg.ue_stats;
 
+    /* [DEBUG] 每 100 次印一次，確認 callback 有被呼叫 */
+    { static uint32_t dbg_cnt = 0; if ((++dbg_cnt % 100) == 0) printf("[Node8 xApp][DEBUG] cb called %u times, num_ues=%u\n", dbg_cnt, num_ues); }
+
     /* 若無活躍 UE 或 ZMQ socket 尚未就緒，靜默跳過 */
     if (num_ues == 0 || stats == NULL || g_zmq_sock == NULL) return;
 
-    /* ── [Rate Limiter] 每 ZMQ_RATE_LIMIT 次才向 Python 查詢，其餘套用快取 ── */
+    /* ── [Rate Limiter] ──────────────────────────────────────────────────
+     * 非 ZMQ 的 callback：下發快取分配後直接返回，delta_tbs 繼續累積。
+     * ZMQ callback (每 ZMQ_RATE_LIMIT 次)：向 Python 查詢並更新快取。
+     * ─────────────────────────────────────────────────────────────────── */
     static uint32_t s_cb_tick = 0;
     if (++s_cb_tick % ZMQ_RATE_LIMIT != 0) {
         if (s_cached_alloc_n > 0) {
@@ -294,7 +288,7 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
     /* ── [Step 1] 序列化 UE 狀態為 JSON ──────────────────────────────────
      *   格式範例:
      *   {
-     *     "node_id": 3585,
+     *     "node_id": 4046,
      *     "ues": [
      *       {"rnti": 12345, "bsr": 1024, "wb_cqi": 12},
      *       ...
@@ -303,7 +297,7 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
      * ─────────────────────────────────────────────────────────────────── */
     cJSON *root = cJSON_CreateObject();
     if (root == NULL) {
-        fprintf(stderr, CLR_RED "[Node3 xApp] cJSON_CreateObject 失敗，Fallback\n" CLR_RESET);
+        fprintf(stderr, CLR_RED "[Node8 xApp] cJSON_CreateObject 失敗，Fallback\n" CLR_RESET);
         apply_fallback(num_ues, stats);
         return;
     }
@@ -343,7 +337,7 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
     cJSON_Delete(root);   /* root 已序列化完畢，立即釋放避免 Memory Leak */
 
     if (payload == NULL) {
-        fprintf(stderr, CLR_RED "[Node3 xApp] cJSON 序列化失敗，Fallback\n" CLR_RESET);
+        fprintf(stderr, CLR_RED "[Node8 xApp] cJSON 序列化失敗，Fallback\n" CLR_RESET);
         apply_fallback(num_ues, stats);
         return;
     }
@@ -356,7 +350,7 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
 
     if (send_rc < 0) {
         /* send 失敗通常代表 Python 端未啟動或 socket 緩衝區滿 */
-        fprintf(stderr, CLR_YEL "[Node3 xApp] ZMQ send 失敗 (%s)，Fallback\n" CLR_RESET,
+        fprintf(stderr, CLR_YEL "[Node8 xApp] ZMQ send 失敗 (%s)，Fallback\n" CLR_RESET,
                 zmq_strerror(zmq_errno()));
         apply_fallback(num_ues, stats);
         return;
@@ -371,7 +365,7 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
     int recv_rc = zmq_recv(g_zmq_sock, recv_buf, sizeof(recv_buf) - 1, 0);
 
     if (recv_rc < 0) {
-        fprintf(stderr, CLR_YEL "[Node3 xApp] ZMQ recv 逾時 (%s)，重建 socket 並 Fallback\n" CLR_RESET,
+        fprintf(stderr, CLR_YEL "[Node8 xApp] ZMQ recv 逾時 (%s)，重建 socket 並 Fallback\n" CLR_RESET,
                 zmq_strerror(zmq_errno()));
         /*
          * recv 逾時後 REQ socket 處於「等待 reply」狀態，
@@ -397,14 +391,14 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
      * ─────────────────────────────────────────────────────────────────── */
     cJSON *resp = cJSON_Parse(recv_buf);
     if (resp == NULL) {
-        fprintf(stderr, CLR_RED "[Node3 xApp] 回傳 JSON 解析失敗，Fallback\n" CLR_RESET);
+        fprintf(stderr, CLR_RED "[Node8 xApp] 回傳 JSON 解析失敗，Fallback\n" CLR_RESET);
         apply_fallback(num_ues, stats);
         return;
     }
 
     cJSON *allocs_arr = cJSON_GetObjectItemCaseSensitive(resp, "allocations");
     if (!cJSON_IsArray(allocs_arr) || cJSON_GetArraySize(allocs_arr) == 0) {
-        fprintf(stderr, CLR_RED "[Node3 xApp] 回傳格式無效 (缺少 'allocations' 陣列)，Fallback\n" CLR_RESET);
+        fprintf(stderr, CLR_RED "[Node8 xApp] 回傳格式無效 (缺少 'allocations' 陣列)，Fallback\n" CLR_RESET);
         cJSON_Delete(resp);
         apply_fallback(num_ues, stats);
         return;
@@ -420,12 +414,14 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
      *     .slot_mask = 時域 Slot 遮罩，0xFFFF 表示允許使用所有 Slot
      *     .priority  = 搶佔優先級，0 為預設
      * ─────────────────────────────────────────────────────────────────── */
+    /* 解析回傳分配，寫入靜態快取（無需 malloc/free）*/
     int new_n    = (alloc_n < MAX_UE_COUNT) ? alloc_n : MAX_UE_COUNT;
     int parsed_n = 0;
     for (int i = 0; i < new_n; i++) {
         cJSON *item   = cJSON_GetArrayItem(allocs_arr, i);
         cJSON *j_rnti = cJSON_GetObjectItemCaseSensitive(item, "rnti");
         cJSON *j_prb  = cJSON_GetObjectItemCaseSensitive(item, "prb_abs");
+
         if (!cJSON_IsNumber(j_rnti) || !cJSON_IsNumber(j_prb)) {
             s_cached_slices[i].id        = (num_ues > 0) ? stats[i % num_ues].rnti : 0;
             s_cached_slices[i].prb_quota = 1.0f / (float)new_n;
@@ -440,13 +436,15 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
             s_cached_slices[i].prb_quota = (float)prb_ratio;
             s_cached_slices[i].slot_mask = SLOT_MASK_FULL;
             s_cached_slices[i].priority  = 0;
-            printf("[Node3 xApp] AI 決策 UE[0x%04x]: prb_abs=%.0f → ratio=%.3f\n",
+            printf("[Node8 xApp] AI 決策 UE[0x%04x]: prb_abs=%.0f → ratio=%.3f\n",
                    s_cached_slices[i].id, prb_abs, prb_ratio);
         }
         parsed_n++;
     }
     s_cached_alloc_n = parsed_n;
     cJSON_Delete(resp);
+
+    /* 立即下發新分配 */
     if (s_cached_alloc_n > 0) {
         mac_ctrl_req_data_t req = {0};
         req.msg.type       = 0;
@@ -463,7 +461,7 @@ int main(int argc, char *argv[])
 {
     printf(CLR_CYAN
            "====================================================\n"
-           "  Node 3 Local xApp — Near-RT 閉環 PRB 控制器\n"
+           "  Node 8 Local xApp — Near-RT 閉環 PRB 控制器\n"
            "  目標節點 ID : %u\n"
            "  ZMQ 端點    : %s\n"
            "  回報週期    : 10 ms\n"
@@ -487,19 +485,19 @@ int main(int argc, char *argv[])
      * ─────────────────────────────────────────────────────────────────── */
     g_zmq_ctx = zmq_ctx_new();
     if (g_zmq_ctx == NULL) {
-        fprintf(stderr, CLR_RED "[Node3 xApp] zmq_ctx_new() 失敗，程式退出\n" CLR_RESET);
+        fprintf(stderr, CLR_RED "[Node8 xApp] zmq_ctx_new() 失敗，程式退出\n" CLR_RESET);
         return EXIT_FAILURE;
     }
 
     if (!zmq_socket_init()) {
-        fprintf(stderr, CLR_RED "[Node3 xApp] ZMQ socket 初始化失敗，程式退出\n" CLR_RESET);
+        fprintf(stderr, CLR_RED "[Node8 xApp] ZMQ socket 初始化失敗，程式退出\n" CLR_RESET);
         zmq_ctx_destroy(g_zmq_ctx);
         return EXIT_FAILURE;
     }
-    printf(CLR_GREEN "[Node3 xApp] ZMQ REQ socket 已連線至 %s\n" CLR_RESET, ZMQ_ENDPOINT);
+    printf(CLR_GREEN "[Node8 xApp] ZMQ REQ socket 已連線至 %s\n" CLR_RESET, ZMQ_ENDPOINT);
 
     /* ─────────────────────────────────────────────────────────────────────
-     * [3] 尋找目標節點 (阻塞等待，直到 Node 3 連線上 FlexRIC Server)
+     * [3] 尋找目標節點 (阻塞等待，直到 Node 8 連線上 FlexRIC Server)
      *   nodes 陣列在整個程式生命週期中保持有效，
      *   因為 g_target_node_id 指向其元素。
      * ─────────────────────────────────────────────────────────────────── */
@@ -510,6 +508,10 @@ int main(int argc, char *argv[])
         nodes = e2_nodes_xapp_api();
 
         for (int i = 0; i < nodes.len; i++) {
+            /*
+             * 結構存取路徑: nodes.n[i].id.nb_id.nb_id
+             *   global_e2_node_id_t.nb_id → e2ap_gnb_id_t.nb_id → uint32_t
+             */
             if (nodes.n[i].id.nb_id.nb_id == TARGET_NODE_ID) {
                 target_idx = i;
                 break;
@@ -517,64 +519,88 @@ int main(int argc, char *argv[])
         }
 
         if (target_idx == -1) {
-            printf(CLR_YEL "[Node3 xApp] 等待 Node 3 (ID=%u) 連線... "
+            printf(CLR_YEL "[Node8 xApp] 等待 Node 8 (ID=%u) 連線... "
                    "目前已連接節點數: %d，2 秒後重試\n" CLR_RESET,
                    TARGET_NODE_ID, nodes.len);
-            free_e2_node_arr_xapp(&nodes);
+            free_e2_node_arr_xapp(&nodes);   /* 釋放本次快照，準備重新查詢 */
             sleep(2);
         }
     }
 
     /* 鎖定目標節點 ID，callback 將使用此指標下發控制訊息 */
     g_target_node_id = &nodes.n[target_idx].id;
-    printf(CLR_GREEN "[Node3 xApp] 成功鎖定 Node 3 (nb_id=%u)\n" CLR_RESET,
+    printf(CLR_GREEN "[Node8 xApp] 成功鎖定 Node 8 (nb_id=%u)\n" CLR_RESET,
            g_target_node_id->nb_id.nb_id);
 
     /* ─────────────────────────────────────────────────────────────────────
      * [4] 訂閱 MAC SM Indication，回報週期 10ms
+     *   - "10_ms" 字串由 mac_sm_ric.c 的 on_subscription_mac_sm_ric() 解析
+     *   - sm_cb_mac 將在每次 Indication 到達時由 FlexRIC 呼叫
      * ─────────────────────────────────────────────────────────────────── */
-    sm_ans_xapp_t sub_ans = report_sm_xapp_api(
-        g_target_node_id,
-        SM_MAC_ID,
-        "100_ms",
-        sm_cb_mac
-    );
-
-    if (!sub_ans.success) {
-        fprintf(stderr, CLR_RED "[Node3 xApp] 訂閱 MAC SM 失敗，程式退出\n" CLR_RESET);
-        free_e2_node_arr_xapp(&nodes);
-        if (g_zmq_sock != NULL) zmq_close(g_zmq_sock);
-        zmq_ctx_destroy(g_zmq_ctx);
-        return EXIT_FAILURE;
+    sm_ans_xapp_t sub_ans = {0};
+    while (!sub_ans.success) {
+        sub_ans = report_sm_xapp_api(
+            g_target_node_id,
+            SM_MAC_ID,
+            "100_ms",     /* 回報週期字串，對應 mac_event_trigger_t.ms = 100 */
+            sm_cb_mac     /* Indication Callback */
+        );
+        if (!sub_ans.success) {
+            printf(CLR_YEL "[Node8 xApp] 訂閱失敗 (DU 可能尚未就緒)，重新查詢節點並重試...\n" CLR_RESET);
+            free_e2_node_arr_xapp(&nodes);
+            sleep(5);
+            target_idx = -1;
+            while (target_idx == -1) {
+                nodes = e2_nodes_xapp_api();
+                for (int i = 0; i < nodes.len; i++) {
+                    if (nodes.n[i].id.nb_id.nb_id == TARGET_NODE_ID) {
+                        target_idx = i;
+                        break;
+                    }
+                }
+                if (target_idx == -1) {
+                    printf(CLR_YEL "[Node8 xApp] 等待 Node 8 (ID=%u) 重新連線... 目前節點數: %d\n" CLR_RESET,
+                           TARGET_NODE_ID, nodes.len);
+                    free_e2_node_arr_xapp(&nodes);
+                    sleep(2);
+                }
+            }
+            g_target_node_id = &nodes.n[target_idx].id;
+            printf(CLR_GREEN "[Node8 xApp] 重新鎖定 Node 8 (nb_id=%u)，重試訂閱\n" CLR_RESET,
+                   g_target_node_id->nb_id.nb_id);
+        }
     }
-    printf(CLR_GREEN "[Node3 xApp] MAC SM 訂閱成功 (handle=%d)，"
+    printf(CLR_GREEN "[Node8 xApp] MAC SM 訂閱成功 (handle=%d)，"
            "閉環控制迴圈啟動中...\n" CLR_RESET, sub_ans.u.handle);
 
     /* ─────────────────────────────────────────────────────────────────────
-     * [5] 啟動 Watchdog 執行緒，偵測 SCTP 斷線後自動退出
+     * [5] 啟動 Watchdog 執行緒
      * ─────────────────────────────────────────────────────────────────── */
-    g_last_mac_time = time(NULL);  /* 初始化時間戳，避免啟動期誤觸 */
+    g_last_mac_time = time(NULL);
     pthread_t wd_tid;
     if (pthread_create(&wd_tid, NULL, watchdog_thread, NULL) == 0) {
         pthread_detach(wd_tid);
-        printf(CLR_GREEN "[Node3 xApp] Watchdog 執行緒已啟動 (超時門檻=%ds)\n"
+        printf(CLR_GREEN "[Node8 xApp] Watchdog 執行緒已啟動 (超時門檻=%ds)\n"
                CLR_RESET, WATCHDOG_TIMEOUT_S);
     } else {
-        fprintf(stderr, CLR_YEL "[Node3 xApp] Watchdog 執行緒啟動失敗，繼續運行\n" CLR_RESET);
+        fprintf(stderr, CLR_YEL "[Node8 xApp] Watchdog 執行緒啟動失敗，繼續運行\n" CLR_RESET);
     }
 
     /* ─────────────────────────────────────────────────────────────────────
-     * [6] 主迴圈：阻塞等待直到收到 SIGINT/SIGTERM
+     * [6] 主迴圈：阻塞等待直到收到 SIGINT/SIGTERM 或環境變數 XAPP_DURATION 到期
+     *   實際的閉環控制邏輯均在 sm_cb_mac() 中執行。
      * ─────────────────────────────────────────────────────────────────── */
     xapp_wait_end_api();
 
     /* ─────────────────────────────────────────────────────────────────────
      * [6] 優雅退出：依序取消訂閱、關閉 ZMQ、釋放節點陣列
      * ─────────────────────────────────────────────────────────────────── */
-    printf("[Node3 xApp] 收到停止訊號，開始清理資源...\n");
+    printf("[Node8 xApp] 收到停止訊號，開始清理資源...\n");
 
+    /* 取消 MAC SM 訂閱 */
     rm_report_sm_xapp_api(sub_ans.u.handle);
 
+    /* 關閉 ZMQ socket 與 context */
     if (g_zmq_sock != NULL) {
         zmq_close(g_zmq_sock);
         g_zmq_sock = NULL;
@@ -584,8 +610,9 @@ int main(int argc, char *argv[])
         g_zmq_ctx = NULL;
     }
 
+    /* 釋放節點陣列 (g_target_node_id 同時失效，但程式即將結束) */
     free_e2_node_arr_xapp(&nodes);
 
-    printf(CLR_GREEN "[Node3 xApp] 程式正常退出\n" CLR_RESET);
+    printf(CLR_GREEN "[Node8 xApp] 程式正常退出\n" CLR_RESET);
     return EXIT_SUCCESS;
 }
