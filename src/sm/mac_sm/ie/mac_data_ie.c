@@ -117,6 +117,7 @@ mac_ind_msg_t cp_mac_ind_msg(mac_ind_msg_t const* src)
   mac_ind_msg_t dst = {0};
 
   dst.tstamp = src->tstamp;
+  dst.backhaul_prb_ratio = src->backhaul_prb_ratio;
   dst.len_ue_stats = src->len_ue_stats;
 
   if(dst.len_ue_stats > 0){
@@ -136,7 +137,8 @@ bool eq_mac_ind_msg(mac_ind_msg_t const* m0, mac_ind_msg_t const* m1)
   assert(m0 != NULL);
   assert(m1 != NULL);
 
-  if(m0->len_ue_stats != m1->len_ue_stats || m0->tstamp != m1->tstamp)
+  if(m0->len_ue_stats != m1->len_ue_stats || m0->tstamp != m1->tstamp
+     || m0->backhaul_prb_ratio != m1->backhaul_prb_ratio)
     return false;
 
   if(m0->len_ue_stats > 0) {

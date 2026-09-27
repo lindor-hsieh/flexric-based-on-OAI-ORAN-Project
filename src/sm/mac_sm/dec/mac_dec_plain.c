@@ -85,6 +85,12 @@ mac_ind_msg_t mac_dec_ind_msg_plain(size_t len, uint8_t const* ind_msg)
   ptr += sizeof(ret.tstamp);
   remaining_len -= sizeof(ret.tstamp);
 
+  // 1b. 讀取 Backhaul-aware 可用 PRB 比例（與 enc 順序一致）
+  assert(remaining_len >= sizeof(ret.backhaul_prb_ratio));
+  memcpy(&ret.backhaul_prb_ratio, ptr, sizeof(ret.backhaul_prb_ratio));
+  ptr += sizeof(ret.backhaul_prb_ratio);
+  remaining_len -= sizeof(ret.backhaul_prb_ratio);
+
   // 2. 讀取 UE 數量 (len_ue_stats)
   assert(remaining_len >= sizeof(ret.len_ue_stats));
   memcpy(&ret.len_ue_stats, ptr, sizeof(ret.len_ue_stats));

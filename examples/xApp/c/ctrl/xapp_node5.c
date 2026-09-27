@@ -114,6 +114,9 @@ static uint64_t s_prev_tbs[TBS_DB_SIZE]  = {0};
  * 供非 ZMQ 的 9 個 callback 複用，確保 MAC 控制連續性 */
 static mac_slice_params_t s_cached_slices[MAX_UE_COUNT];
 static int                s_cached_alloc_n = 0;
+/* 目前 MAC 端是否有我們下發、尚未解除的 PRB 上限（fallback 時要解除一次，見 apply_fallback） */
+static bool               s_caps_active = false;
+static mac_slice_params_t s_release_slices[MAX_UE_COUNT];   /* 解除用，static 以免非同步引用區域變數 */
 
 static uint64_t compute_delta_tbs(uint16_t rnti, uint64_t curr_tbs)
 {
@@ -203,15 +206,31 @@ static bool zmq_socket_init(void)
 static void apply_fallback(uint32_t num_ues, mac_ue_stats_impl_t const *stats)
 {
     /*
-     * Python 推論伺服器未回應時，不送出任何控制訊息。
-     * 退回 OAI 預設排程器 (Proportional Fairness) 自行處理 PRB 分配。
+     * Python 推論伺服器未回應（ZMQ 失敗／逾時／回傳無效）時退回 OAI 預設排程器 (Proportional Fairness)。
      *
-     * 原因：若在 Fallback 時仍呼叫 control_sm_xapp_api()，5 個 xApp 合計
-     * 每秒產生 ~500 個 CONTROL-REQUEST，會把 FlexRIC 的 pending event queue
-     * 打爆，導致 "Pending event timeout" → E42 連線斷開 → FlexRIC crash。
+     * OAI MAC 會永遠保留最後一次下發的 PRB 上限（沒有過期機制），光是「不再送控制」並不會退回 PF，
+     * 上一次的 DRL 上限會一直生效。所以進入 fallback 時要把已下發的上限「解除一次」（prb_quota=1.0，
+     * MAC 端 ratio>=1.0 即不截斷）。只在有上限生效時送一次（s_caps_active），之後連續失敗不再送，
+     * 不會製造大量 CONTROL-REQUEST 打爆 FlexRIC 的 pending event queue。
+     * 下一個 ZMQ 週期成功時會重新下發上限並把 s_caps_active 設回 true。
      */
     (void)num_ues;
     (void)stats;
+    if (!s_caps_active || s_cached_alloc_n <= 0) return;
+
+    for (int i = 0; i < s_cached_alloc_n; i++) {
+        s_release_slices[i].id        = s_cached_slices[i].id;
+        s_release_slices[i].prb_quota = 1.0f;          /* 不截斷 → 回到 PF 的原本行為 */
+        s_release_slices[i].slot_mask = SLOT_MASK_FULL;
+        s_release_slices[i].priority  = 0;
+    }
+    mac_ctrl_req_data_t rel = {0};
+    rel.msg.type       = 0;
+    rel.msg.len_slices = (uint32_t)s_cached_alloc_n;
+    rel.msg.slices     = s_release_slices;
+    control_sm_xapp_api(g_target_node_id, SM_MAC_ID, &rel);
+    s_caps_active   = false;
+    s_cached_alloc_n = 0;
 }
 
 /* =============================================================================
@@ -275,13 +294,14 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
      * ─────────────────────────────────────────────────────────────────── */
     static uint32_t s_cb_tick = 0;
     if (++s_cb_tick % ZMQ_RATE_LIMIT != 0) {
-        if (s_cached_alloc_n > 0) {
-            mac_ctrl_req_data_t cached_req = {0};
-            cached_req.msg.type       = 0;
-            cached_req.msg.len_slices = (uint32_t)s_cached_alloc_n;
-            cached_req.msg.slices     = s_cached_slices;
-            control_sm_xapp_api(g_target_node_id, SM_MAC_ID, &cached_req);
-        }
+        /*
+         * 非 ZMQ 的 callback 不再重送快取控制（2026-09-26 移除）。
+         * OAI MAC 把最後一次控制存在 nrmac->xapp_2d_ctrl（ran_func_mac.c::write_ctrl_mac_sm），
+         * 直到下一次覆寫才會改變、沒有任何過期機制，所以每 10ms 重送相同內容完全多餘；卻會讓每個 xApp
+         * 每秒送 ~100 個 CONTROL-REQUEST（12 個合計 ~1200/s），每個請求在 FlexRIC 建一個 3 秒逾時計時器
+         * （near_ric.c::control_service_near_ric，見 HISTORY.md「FlexRIC pending event」），是崩潰風險來源。
+         * 現在只在 ZMQ callback（每 100ms）下發新分配。
+         */
         return;
     }
 
@@ -304,6 +324,9 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
 
     /* 寫入節點識別 ID */
     cJSON_AddNumberToObject(root, "node_id", (double)TARGET_NODE_ID);
+    /* Backhaul-aware 可用 PRB 比例（節點級 ∈[0,1]，DU 實際可用 PRB 池 = 106×此值）：xApp 動作是「每 UE PRB 上限」，
+     * 池子大小決定上限是否綁得住，DRL 需要看到它（2026-09-26 由 E2SM-MAC 回報，見 mac_data_ie.h） */
+    cJSON_AddNumberToObject(root, "bh_ratio", (double)mac_ind->msg.backhaul_prb_ratio);
 
     /* 建立 UE 陣列並填入各 UE 的關鍵狀態 */
     cJSON *ue_array = cJSON_AddArrayToObject(root, "ues");
@@ -451,6 +474,7 @@ static void sm_cb_mac(sm_ag_if_rd_t const *rd)
         req.msg.len_slices = (uint32_t)s_cached_alloc_n;
         req.msg.slices     = s_cached_slices;
         control_sm_xapp_api(g_target_node_id, SM_MAC_ID, &req);
+        s_caps_active = true;   /* MAC 端現在有 DRL 上限，fallback 時需解除 */
     }
 }
 

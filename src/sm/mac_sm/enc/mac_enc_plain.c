@@ -93,6 +93,7 @@ byte_array_t mac_enc_ind_msg_plain(mac_ind_msg_t const* ind_msg)
   // 計算總長度：時間戳 + UE數量 + UE統計數據陣列
   // sizeof(mac_ue_stats_impl_t) 已經包含了你在 .h 中新增的 dl_buffer_info 等欄位
   const uint32_t len = sizeof(ind_msg->tstamp) + 
+                       sizeof(ind_msg->backhaul_prb_ratio) + 
                        sizeof(ind_msg->len_ue_stats) + 
                        (sizeof(mac_ue_stats_impl_t) * ind_msg->len_ue_stats);
                       
@@ -104,6 +105,10 @@ byte_array_t mac_enc_ind_msg_plain(mac_ind_msg_t const* ind_msg)
   // 1. 寫入時間戳 (tstamp)
   memcpy(ptr, &ind_msg->tstamp, sizeof(ind_msg->tstamp));
   ptr += sizeof(ind_msg->tstamp);
+
+  // 1b. 寫入 Backhaul-aware 可用 PRB 比例（節點級，2026-09-26 新增；dec 端順序必須一致）
+  memcpy(ptr, &ind_msg->backhaul_prb_ratio, sizeof(ind_msg->backhaul_prb_ratio));
+  ptr += sizeof(ind_msg->backhaul_prb_ratio);
 
   // 2. 寫入 UE 數量 (len_ue_stats)
   memcpy(ptr, &ind_msg->len_ue_stats, sizeof(ind_msg->len_ue_stats));

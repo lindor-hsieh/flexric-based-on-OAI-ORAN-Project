@@ -118,6 +118,10 @@ typedef struct {
   uint32_t len_ue_stats;
   mac_ue_stats_impl_t* ue_stats;
   int64_t tstamp;
+  /* 節點級：Backhaul-aware 動態 PRB 預算的可用比例 ∈ [0,1]（= gNB_MAC_INST::backhaul_prb_ratio，DU 排程器實際可用
+   * PRB 池 = 106 × 此值）。2026-09-26 加入，讓 DRL 看到動作（每 UE PRB 上限）真正的可用資源池大小。
+   * 線上格式（enc/dec plain）在 tstamp 之後多 4 bytes，RIC/xApp/gNB 三側的 libmac_sm.so 必須同版本。 */
+  float backhaul_prb_ratio;
 } mac_ind_msg_t;
 
 void free_mac_ind_msg(mac_ind_msg_t* src); 
